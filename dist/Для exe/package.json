@@ -1,0 +1,19 @@
+{
+  "name": "collision-manager-tools",
+  "version": "1.0.0",
+  "description": "Выгрузка отчёта без браузера",
+  "pkg": {
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build:export": "pkg export-tool.js --targets node18-win-x64 --output dist/Выгрузка_отчёта.exe",
+    "build": "npm run build:export"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

@@ -1,0 +1,835 @@
+:root {
+    --color-bg: #ffffff;
+    --color-bg2: #f8f9fa;
+    --color-accent: #1a4b8cd7;
+    --color-accent-dark: #123a6e;
+    --color-positive: #bffbcd;
+    --color-positive-for-total: #17c941;
+    --color-positive-for-text: #00c02a;
+    --color-negative: #fbbebe;
+    --color-negative-for-total: #f12323;
+    --color-negative-for-text: #af0000;
+    --color-active: #fcd695;
+    --color-active-for-text: #bb7600;
+    --color-neutral: #000000;
+    --color-text: #1f1f1f;
+    --color-muted: #8a8a8a;
+    --color-border: #e0e0e0;
+    --color-border-short: #8f8f8f;
+    --color-track: #e6e6e6;
+
+    --sidebar-width: 300px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: "Barlow Condensed", "Segoe UI", Arial, sans-serif;
+    color: var(--color-text);
+    background: var(--color-bg);
+    min-height: 100vh;
+    overflow-y: auto;
+}
+
+button, input, select, textarea {
+    font-family: inherit;
+}
+
+.layout {
+    display: flex;
+    min-height: 100vh;
+    width: 100%;
+}
+
+/* подсветка при перетаскивании папок */
+body.dragging-folders .sidebar {
+    outline: 2px dashed var(--color-accent);
+    outline-offset: -6px;
+    background: rgba(26, 75, 140, 0.05);
+    transition: background-color 0.2s ease;
+}
+
+.sidebar {
+    width: var(--sidebar-width);
+    flex: 0 0 var(--sidebar-width);
+    background: #ffffff;
+    border-right: 1px solid var(--color-border);
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    overflow-y: auto;
+    z-index: 10;
+    height: 100%;
+}
+
+.sidebar__nav {
+    display: flex;
+    flex-direction: column;
+    padding: 0px 22px;
+    height: auto;
+    background: rgba(255,255,255,0.95);
+}
+
+.sidebar__header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 20px;
+    padding-top: 20px;
+}
+
+.logo-placeholder-img {
+    height: 33px;
+    flex: 0 0 auto;
+}
+
+.sidebar__title {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.15;
+    font-weight: 600;
+}
+
+/* ===== Блок статистики ===== */
+
+.stats-block {
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+    margin-top: 5px;
+}
+
+.stats-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.stats-item__value {
+    font-size: 45px;
+    font-weight: 300;
+    line-height: 1;
+}
+
+.stats-total .stats-item__value {
+    color: var(--color-text);
+}
+
+.stats-item__label {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--color-muted);
+    text-align: center;
+}
+
+.value-positive {
+    color: var(--color-positive-for-total);
+}
+
+.value-negative  {
+    color: var(--color-negative-for-total);
+}
+
+.value-neutral {
+    color: var(--color-neutral);
+}
+
+/* ===== Период ===== */
+
+.period-stats {
+    margin-top: 22px;
+}
+
+.period-stats__label {
+    margin: 0;
+    font-size: 15px;
+    color: var(--color-muted);
+    text-align: center;
+}
+
+.period-stats__value {
+    display: block;
+    margin-top: 6px;
+    font-size: 35px;
+    font-weight: 300;
+    line-height: 1;
+    text-align: center;
+}
+
+.period-stats__caption {
+    display: block;
+    margin-top: 4px;
+    font-size: 14px;
+    color: var(--color-muted);
+    text-align: center;
+}
+
+/* ===== Фильтр по разделам ===== */
+
+.discipline-filter__label {
+    margin: 0 0 8px;
+    font-size: 15px;
+    color: var(--color-muted);
+}
+
+.discipline-filter__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+}
+
+.discipline-filter__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.discipline-filter__checkbox {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--color-accent);
+}
+
+/* ===== Разделитель и кнопка ===== */
+
+.sidebar_divider_horizontal {
+    width: 100%;
+    border: none;
+    border-top: 2px solid var(--color-border-short);
+    margin-top: 5px;
+    margin-bottom: 1px;
+}
+
+.sidebar_divider_vertical {
+    width: 2px;
+    height: 100%;
+    border: none;
+    border-top: 120px solid var(--color-border-short);
+    margin: 0px 0;
+}
+
+.btn-action {
+    width: 100%;
+    padding: 10px 0;
+    margin-top: 12px;
+    border: 1px solid var(--color-accent);
+    border-radius: 10px;
+    background: var(--color-accent);
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-action:hover {
+    background: #ffffff;
+    color: var(--color-accent);
+}
+
+.btn-action:disabled {
+    border-color: var(--color-border-short);
+    background: #ffffff;
+    color: var(--color-muted);
+    cursor: not-allowed;
+}
+
+.btn-action:disabled:hover {
+    background: #ffffff;
+    color: var(--color-muted);
+}
+
+/* ===== Кастомный дропдаун со списком папок ===== */
+
+.folder-dropdown {
+    position: relative;
+    width: 100%;
+    margin-top: 10px;
+}
+
+.folder-dropdown__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 0;
+    padding: 8px 12px;
+}
+
+.folder-dropdown__toggle span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-dropdown__arrow {
+    flex: 0 0 auto;
+    transition: transform 0.2s ease;
+}
+
+.folder-dropdown__toggle[aria-expanded="true"] .folder-dropdown__arrow {
+    transform: rotate(180deg);
+}
+
+.folder-dropdown__list {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 5;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: #ffffff;
+    border: 1px solid var(--color-accent);
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transform: translateY(-4px);
+    transition: max-height 0.25s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+
+.folder-dropdown__list--open {
+    max-height: 220px;
+    opacity: 1;
+    overflow-y: auto;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.folder-dropdown__item {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--color-text);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.folder-dropdown__item:hover,
+.folder-dropdown__item--active {
+    background: var(--color-accent);
+    color: #ffffff;
+}
+
+.file-input-hidden {
+    display: none;
+}
+
+/* ===== Основной контент ===== */
+
+.main-conteiner {
+    background-color: var(--color-bg2);
+    padding-left: var(--sidebar-width);
+    width: 100%;
+    min-height: 100vh;
+}
+
+.content {
+    width: 100%;
+    min-height: 100vh;
+    padding: 16px 24px;
+    display: grid;
+    grid-template-rows: 35vh 60vh 40vh;
+    grid-template-columns: 8fr 2fr;
+    gap: 16px;
+    grid-template-areas:
+        "total-chart total-chart"
+        "collision-matrix section-table"
+        "discipline-chart discipline-chart";
+}
+
+.content__row {
+    display: contents;
+}
+
+.card {
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 8px 16px;
+    overflow: hidden;
+    min-height: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: box-shadow 0.2s ease;
+    justify-content: center;
+}
+
+.card:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* Для карточек первой и третьей строки (графики) — растягиваются на всю высоту строки */
+.card:has(#total-chart-body),
+.card:has(#discipline-chart-body) {
+    height: 100%;
+}
+
+.card:has(#total-chart-body) .card__body,
+.card:has(#discipline-chart-body) .card__body {
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+/* Для карточек второй строки (матрица и таблица) — высота по содержимому */
+.card:has(#collision-matrix-body),
+.card:has(#section-table-body) {
+    height: auto;
+    flex: 0 0 auto;
+}
+
+.card:has(#collision-matrix-body) .card__body,
+.card:has(#section-table-body) .card__body {
+    flex: 0 1 auto;
+    overflow: visible;
+}
+
+.card:has(#total-chart-body) {
+    grid-area: total-chart;
+}
+
+.card:has(#collision-matrix-body) {
+    grid-area: collision-matrix;
+}
+
+.card:has(#section-table-body) {
+    grid-area: section-table;
+}
+
+.card:has(#discipline-chart-body) {
+    grid-area: discipline-chart;
+}
+
+.card__title {
+    display: flex;
+    align-items: center;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1.2;
+    margin: 0 0 8px;
+    color: var(--color-text);
+    flex-shrink: 0;
+}
+
+/* ===== Стиль кнопки "Приблизить последние пять" ===== */
+
+.btn-zoom-last-five {
+    margin-left: auto;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid var(--color-accent);
+    border-radius: 6px;
+    background: var(--color-accent);
+    color: #ffffff;
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn-zoom-last-five:hover {
+    background: #ffffff;
+    color: var(--color-accent);
+}
+
+/* ===== Таблицы ===== */
+
+.matrix-table-wrapper,
+.section-table-wrapper {
+    width: 100%;
+    overflow: auto;
+    max-height: 100%;
+}
+
+.matrix-table,
+.section-table {
+    border-collapse: separate;
+    border-spacing: 0 3px;
+    font-size: 20px;
+    width: 100%;
+    table-layout: fixed;
+}
+
+.matrix-table th,
+.matrix-table td,
+.section-table th,
+.section-table td {
+    border: none;
+    padding: 6px 8px;
+    text-align: center;
+    white-space: nowrap;
+    aspect-ratio: 1 / 1;
+    min-width: 40px;
+    border-radius: 12px;
+
+}
+
+.matrix-table thead th,
+.section-table thead th {
+    background: transparent;
+    color: var(--color-text);
+    font-weight: 400;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    border-radius: 8px 8px 0 0;
+}
+
+.matrix-table tbody th {
+    background: #ffffff;
+    font-weight: 400;
+    text-align: left;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    border-radius: 8px 0 0 8px;
+}
+
+.matrix-table__blank-cell {
+    background: #ffffff;
+}
+
+.heat-cell {
+    color: var(--color-text);
+    font-weight: 400;
+}
+
+.heat-cell--empty {
+    background: transparent;
+    color: var(--color-muted);
+}
+
+.section-table__discipline {
+    text-align: left;
+    font-weight: 400;
+}
+
+/* Индикатор изменения */
+.value-delta {
+    margin-left: 8px;
+    font-size: 20px;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.value-delta__triangle {
+    display: inline-block;
+    vertical-align: middle;
+    width: 0;
+    height: 0;
+    margin-right: 4px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+}
+
+.value-delta__triangle--down {
+    border-top: 9px solid currentColor;
+}
+
+.value-delta__triangle--up {
+    border-bottom: 9px solid currentColor;
+}
+
+.value-delta--decrease {
+    color: var(--color-positive-for-text);
+}
+
+.value-delta--increase {
+    color: var(--color-negative-for-text);
+}
+
+/* ===== Графики ===== */
+
+.chart-axis-label {
+    font-family: "Barlow Condensed", "Segoe UI", Arial, sans-serif;
+    font-size: 15px;
+    font-weight: 400;
+    fill: #333;
+}
+
+.chart-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.chart-axis-line {
+    stroke: var(--color-text);
+    stroke-width: 2;
+}
+
+.chart-line {
+    fill: none;
+    stroke: var(--color-accent-dark);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    transition: stroke 0.15s ease;
+}
+
+.chart-point {
+    fill: var(--color-accent-dark);
+    transition: fill 0.15s ease, stroke 0.15s ease;
+    cursor: pointer;
+}
+
+.chart-point--selected {
+    fill: #ffffff;
+    stroke: var(--color-accent-dark);
+    stroke-width: 3;
+}
+
+.chart-point--now {
+    fill: #ffffff;
+    stroke: var(--color-accent-dark);
+    stroke-width: 3;
+}
+
+.chart-guideline {
+    stroke: var(--color-accent-dark);
+    stroke-width: 2;
+    stroke-dasharray: 5 4;
+}
+
+.chart-hover-line {
+    stroke: var(--color-accent-dark);
+    stroke-width: 2;
+    stroke-dasharray: 6 5;
+    pointer-events: none;
+}
+
+.chart-highlight-rect {
+    fill: rgba(39, 207, 17, 0.212);
+    pointer-events: none;
+}
+
+.custom-tooltip .discipline {
+    font-weight: 400;
+    color: #555;
+    margin-top: 2px;
+}
+
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-bottom: 10px;
+    font-size: 16px;
+    color: var(--color-text);
+    flex-shrink: 0;
+}
+
+.chart-legend__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.chart-legend__checkbox {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--color-accent);
+}
+
+.chart-legend__swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+}
+
+/* ===== Всплывающая подсказка для графика 1 (динамика) ===== */
+.custom-tooltip {
+    position: fixed;
+    z-index: 1000;
+    padding: 8px 12px;
+    background: #ffffff;
+    border: 2px solid #000000;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    font-family: "Barlow Condensed", "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #000000;
+    pointer-events: none;
+    display: none;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+.custom-tooltip .date {
+    font-weight: 400;
+    color: #555;
+}
+.custom-tooltip .value {
+    font-weight: 700;
+    color: #000;
+}
+
+/* Всплывающая подсказка для графика 2 (по разделам) — оставляем старую */
+.chart-tooltip {
+    position: fixed;
+    z-index: 50;
+    padding: 6px 10px;
+    background: var(--color-accent-dark);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    display: none;
+}
+
+/* ===== Блок "Активные / Новые / Решённые" (непрозрачные яркие) ===== */
+
+.comparison-stats {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.comparison-stats__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 5px;
+    border-radius: 12px;
+    text-align: center;
+    flex: 1;
+}
+
+/* Число */
+.comparison-stats__item .number {
+    font-size: 24px;
+    color: #000000;
+}
+
+/* Слово */
+.comparison-stats__item .label {
+    font-size: 10px;
+    color: #000000;
+}
+
+.comparison-stats__item--active {
+    background: var(--color-active);
+    text-align: center;
+}
+
+.comparison-stats__item--new {
+    background: var(--color-negative);
+    text-align: center;
+}
+
+.comparison-stats__item--resolved {
+    background: var(--color-positive);
+    text-align: center;
+}
+
+.comparison-stats__item--active .number,
+.comparison-stats__item--active .label {
+    color: var(--color-active-for-text);
+    font-weight: 500;
+}
+
+.comparison-stats__item--new .number,
+.comparison-stats__item--new .label {
+    color: var(--color-negative-for-text);
+    font-weight: 500;
+}
+
+.comparison-stats__item--resolved .number,
+.comparison-stats__item--resolved .label {
+    color: var(--color-positive-for-text);
+    font-weight: 500;
+}
+
+/* ===== Два выпадающих списка для выбора дат ===== */
+
+.date-range-selectors {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    margin-top: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: space-between;
+}
+
+.date-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 1 auto;
+}
+
+.date-selector__label {
+    font-size: 14px;
+    color: var(--color-muted);
+    margin: 0;
+    white-space: nowrap;
+    text-align: center;
+}
+
+.date-selector .folder-dropdown {
+    width: fit-content;
+    margin-top: 0;
+}
+
+.date-selector .folder-dropdown__toggle {
+    width: auto;
+    min-width: 110px;
+    max-width: 180px;
+    padding: 6px 12px;
+    margin-top: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.date-selector .folder-dropdown__list {
+    width: 100%;
+    min-width: 130px;
+    max-width: 180px;
+    box-sizing: border-box;
+}
+
+/* Контейнер графика по разделам — flex-колонка */
+#discipline-chart-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;          /* занять всё пространство родителя */
+    min-height: 0;         /* чтобы flex-схлопывание работало корректно */
+}
+
+/* Легенда — не сжимается */
+#discipline-chart-body .chart-legend {
+    flex-shrink: 0;
+}
+
+/* SVG — занимает оставшееся место */
+#discipline-chart-body .chart-svg {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    height: auto;          /* переопределяем фиксированную высоту */
+}

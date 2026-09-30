@@ -8,6 +8,9 @@
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
         <link rel="stylesheet" href="style.css">
+        <!-- Библиотеки для кнопки "Выгрузить в PDF" (нужен интернет) -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
         <script src="script.js" defer></script>
     </head>
     <body>
@@ -104,6 +107,8 @@
                     <button type="button" id="btn-export-report" class="btn-action">Выгрузить отчёт</button>
 
                     <button type="button" id="btn-clear-folders" class="btn-action">Очистить выбор папок</button>
+
+                    <button type="button" id="btn-export-pdf" class="btn-action">Выгрузить в PDF</button>
                 </nav>
             </aside>
 

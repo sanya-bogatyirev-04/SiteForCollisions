@@ -346,7 +346,7 @@ body.dragging-folders .sidebar {
     padding: 16px 24px;
     display: grid;
     grid-template-rows: 35vh 60vh 40vh;
-    grid-template-columns: 8fr 2fr;
+    grid-template-columns: 7fr 3fr;
     gap: 16px;
     grid-template-areas:
         "total-chart total-chart"
@@ -395,10 +395,27 @@ body.dragging-folders .sidebar {
     flex: 0 0 auto;
 }
 
-.card:has(#collision-matrix-body) .card__body,
-.card:has(#section-table-body) .card__body {
+.card:has(#collision-matrix-body) .card__body {
     flex: 0 1 auto;
     overflow: visible;
+}
+
+/* Таблица по разделам: тело занимает всю высоту плитки, а при раскрытых
+   списках файлов таблица прокручивается ВНУТРИ плитки — высота плитки не
+   меняется. Пока таблица помещается, она по-прежнему по центру (margin auto). */
+.card:has(#section-table-body) .card__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.card:has(#section-table-body) .section-table-wrapper {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: none;
+    margin: auto 0;
 }
 
 .card:has(#total-chart-body) {
@@ -520,6 +537,107 @@ body.dragging-folders .sidebar {
 .section-table__discipline {
     text-align: left;
     font-weight: 400;
+}
+
+/* ===== Раскрывающиеся списки файлов в таблице по разделам ===== */
+
+.section-table__col-name {
+    width: 62%;
+}
+
+.section-table__col-total {
+    width: 38%;
+}
+
+/* при прокрутке строки уходят под заголовок — он должен быть непрозрачным */
+.section-table thead th {
+    background: #ffffff;
+}
+
+.section-table__toggle {
+    display: inline-block;
+    width: 16px;
+    color: var(--color-muted);
+    font-size: 14px;
+    visibility: hidden;
+    transition: transform 0.2s ease;
+}
+
+.section-table__row--expandable {
+    cursor: pointer;
+}
+
+.section-table__row--expandable .section-table__toggle {
+    visibility: visible;
+}
+
+.section-table__row--expandable:hover .section-table__discipline {
+    color: var(--color-accent-dark);
+}
+
+.section-table__row--expanded .section-table__toggle {
+    transform: rotate(90deg);
+}
+
+.section-table .section-table__file-row td {
+    padding: 2px 8px;
+    font-size: 15px;
+    border-radius: 0;
+}
+
+.section-table .section-table__file-name {
+    padding-left: 24px;
+    text-align: left;
+    color: var(--color-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.section-table__file-count {
+    color: var(--color-text);
+}
+
+.section-table__file-row .value-delta {
+    margin-left: 6px;
+    font-size: 14px;
+}
+
+.section-table__file-row .value-delta__triangle {
+    border-left-width: 4px;
+    border-right-width: 4px;
+}
+
+.section-table__file-row .value-delta__triangle--down {
+    border-top-width: 6px;
+}
+
+.section-table__file-row .value-delta__triangle--up {
+    border-bottom-width: 6px;
+}
+
+/* ===== Шапка PDF (вставляется только в копию страницы при выгрузке) ===== */
+
+.pdf-header {
+    grid-area: pdf-header;
+    padding: 4px 4px 0;
+    color: var(--color-text);
+}
+
+.pdf-header__title {
+    font-size: 26px;
+    font-weight: 600;
+}
+
+.pdf-header__line {
+    margin-top: 4px;
+    font-size: 16px;
+    color: var(--color-muted);
+}
+
+.pdf-header__line b {
+    color: var(--color-text);
+    font-weight: 600;
 }
 
 /* Индикатор изменения */

@@ -146,6 +146,7 @@ function buildClashRecords(folderPath) {
         const [firstDiscipline, secondDiscipline] = parseDisciplinePair(nameWithoutExtension);
         const guids = collectClashGuids(path.join(folderPath, entry.name));
         return {
+            fileName: entry.name,
             discipline1: firstDiscipline || NOT_DEFINED,
             discipline2: secondDiscipline || NOT_DEFINED,
             total: guids.length,
@@ -238,7 +239,15 @@ function exportReportForFolder(folderPath) {
     const year = today.getFullYear();
     const fileName = `${folderName}_${day}-${month}-${year}.json`;
 
-    const reportData = { total, sections, pairs, guids };
+    // список файлов — для раскрывающихся строк "Таблицы по разделам" на сайте
+    const files = records.map((r) => ({
+        fileName: r.fileName,
+        discipline1: r.discipline1,
+        discipline2: r.discipline2,
+        total: r.total,
+    }));
+
+    const reportData = { total, sections, pairs, guids, files };
 
     const archiveDir = path.join(folderPath, ARCHIVE_FOLDER_NAME);
     fs.mkdirSync(archiveDir, { recursive: true });

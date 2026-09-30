@@ -59,6 +59,7 @@ const endDateLabel = document.getElementById('end-date-label');
 const endDateList = document.getElementById('end-date-list');
 
 const btnExportReport = document.getElementById('btn-export-report');
+const btnExportPdf = document.getElementById('btn-export-pdf');
 
 const collisionMatrixBody = document.getElementById('collision-matrix-body');
 const sectionTableBody = document.getElementById('section-table-body');
@@ -74,6 +75,7 @@ let activeFolderIndex = -1;
 let activeFolderRecords = [];
 let archivePoints = [];
 let pinnedDisciplines = new Set();
+let expandedSections = new Set(); // разделы, раскрытые в "Таблице по разделам"
 let disciplineFilter = new Set();
 let startDateIndex = -1;
 let endDateIndex = -1;
@@ -242,6 +244,8 @@ function buildClashRecords(files) {
         const nameWithoutExtension = file.name.replace(/\.xml$/i, '');
         const [firstDiscipline, secondDiscipline] = parseDisciplinePair(nameWithoutExtension);
         return collectClashGuids(file).then((guids) => ({
+            // имя файла нужно для раскрывающегося списка файлов в "Таблице по разделам"
+            fileName: file.name,
             discipline1: firstDiscipline || NOT_DEFINED,
             discipline2: secondDiscipline || NOT_DEFINED,
             total: guids.length,
@@ -294,6 +298,19 @@ function buildArchivePoints(allFiles, folderName) {
                 const guidEntries = Array.isArray(data.guids)
                     ? data.guids.filter((entry) => entry && typeof entry.guid === 'string')
                     : [];
+                // "files" есть только в отчётах, выгруженных после появления
+                // списка файлов в "Таблице по разделам"; в старых отчётах его
+                // нет — тогда для архивной даты список файлов просто недоступен
+                const files = Array.isArray(data.files)
+                    ? data.files
+                        .filter((entry) => entry && typeof entry.fileName === 'string')
+                        .map((entry) => ({
+                            fileName: entry.fileName,
+                            discipline1: entry.discipline1 || NOT_DEFINED,
+                            discipline2: entry.discipline2 || NOT_DEFINED,
+                            total: Number(entry.total) || 0,
+                        }))
+                    : [];
                 return {
                     key: parsed.dateKey,
                     date: parsed.date,
@@ -301,6 +318,7 @@ function buildArchivePoints(allFiles, folderName) {
                     sections: data.sections && typeof data.sections === 'object' ? data.sections : {},
                     pairs: data.pairs && typeof data.pairs === 'object' ? data.pairs : {},
                     guidEntries,
+                    files,
                 };
             })
         )
@@ -500,22 +518,92 @@ function renderCollisionMatrix(pairs, referencePairs) {
 
 // ===== Сводная таблица по разделам =====
 
-function renderSectionTable(records, referenceData) {
+/**
+ * Экранирование текста для вставки в HTML (имена файлов приходят от пользователя)
+ */
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/**
+ * Файлы, относящиеся к разделу: файл "03_АР_Окна Двери-ВиК_10.xml" относится
+ * и к АР, и к ВиК, поэтому попадает в списки обоих разделов
+ */
+function getDisciplineFiles(files, discipline) {
+    return files
+        .filter((file) => file.discipline1 === discipline || file.discipline2 === discipline)
+        .sort((a, b) => b.total - a.total || a.fileName.localeCompare(b.fileName, undefined, { numeric: true }));
+}
+
+/**
+ * files — список файлов конечной даты (для архивной даты есть только в
+ * отчётах, выгруженных с полем "files"); если списка нет — строки не
+ * раскрываются. referenceData.files (если есть) — для индикатора изменения
+ * по каждому файлу.
+ */
+function renderSectionTable(records, referenceData, files = []) {
     sectionTableBody.innerHTML = '';
     const refRecords = referenceData ? sectionsToClashRecords(referenceData.sections) : [];
     const disciplines = getPresentDisciplines([...records, ...refRecords]);
     if (!disciplines.length) return;
     const rows = disciplines.map(d => ({ discipline: d, total: getDisciplineTotal(records, d) }));
     rows.sort((a, b) => b.total - a.total);
-    let html = '<div class="section-table-wrapper"><table class="section-table"><thead><tr><th>Раздел</th><th>Всего</th></tr></thead><tbody>';
+
+    const refFiles = referenceData && Array.isArray(referenceData.files) && referenceData.files.length
+        ? new Map(referenceData.files.map((file) => [file.fileName, file.total]))
+        : null;
+
+    let html = '<div class="section-table-wrapper"><table class="section-table">'
+        + '<colgroup><col class="section-table__col-name"><col class="section-table__col-total"></colgroup>'
+        + '<thead><tr><th>Раздел</th><th>Всего</th></tr></thead><tbody>';
     rows.forEach(row => {
         const refValue = referenceData ? referenceData.sections?.[row.discipline] : undefined;
-        html += `<tr><td class="section-table__discipline">${row.discipline}</td>`;
+        const disciplineFiles = getDisciplineFiles(files, row.discipline);
+        const isExpandable = disciplineFiles.length > 0;
+        const isExpanded = isExpandable && expandedSections.has(row.discipline);
+        const rowClass = 'section-table__row'
+            + (isExpandable ? ' section-table__row--expandable' : '')
+            + (isExpanded ? ' section-table__row--expanded' : '');
+        const rowTitle = isExpandable ? '' : ' title="Нет данных по файлам для выбранной даты"';
+        html += `<tr class="${rowClass}" data-discipline="${escapeHtml(row.discipline)}"${rowTitle}>`;
+        html += `<td class="section-table__discipline"><span class="section-table__toggle">▸</span>${escapeHtml(row.discipline)}</td>`;
         html += renderHeatCell(row.total, '', refValue);
         html += '</tr>';
+
+        disciplineFiles.forEach((file) => {
+            const refFileValue = refFiles ? (refFiles.get(file.fileName) || 0) : undefined;
+            const name = escapeHtml(file.fileName);
+            html += `<tr class="section-table__file-row" data-parent="${escapeHtml(row.discipline)}"${isExpanded ? '' : ' hidden'}>`;
+            html += `<td class="section-table__file-name" title="${name}">${name}</td>`;
+            html += `<td class="section-table__file-count">${file.total}${renderDeltaIndicator(file.total, refFileValue)}</td>`;
+            html += '</tr>';
+        });
     });
     html += '</tbody></table></div>';
     sectionTableBody.innerHTML = html;
+}
+
+/**
+ * Раскрытие/сворачивание списка файлов по клику на раздел — без полной
+ * перерисовки таблицы (прокрутка сохраняется)
+ */
+function setupSectionTableInteractions() {
+    sectionTableBody.addEventListener('click', (event) => {
+        const row = event.target.closest('.section-table__row--expandable');
+        if (!row) return;
+        const discipline = row.dataset.discipline;
+        const isExpanded = !expandedSections.has(discipline);
+        if (isExpanded) expandedSections.add(discipline);
+        else expandedSections.delete(discipline);
+        row.classList.toggle('section-table__row--expanded', isExpanded);
+        sectionTableBody.querySelectorAll('.section-table__file-row').forEach((fileRow) => {
+            if (fileRow.dataset.parent === discipline) fileRow.hidden = !isExpanded;
+        });
+    });
 }
 
 // ===== Графики =====
@@ -913,6 +1001,7 @@ function getDataForDate(index) {
             sections,
             pairs,
             guidEntries,
+            files: visibleRecords,
         };
     }
     const point = archivePoints[index];
@@ -924,6 +1013,7 @@ function getDataForDate(index) {
         sections: filtered.sections,
         pairs: filtered.pairs,
         guidEntries: filtered.guidEntries || [],
+        files: filterRecordsByDiscipline(point.files || []),
     };
 }
 
@@ -1108,7 +1198,7 @@ function updateDashboard() {
     renderDisciplineChart(visiblePoints, startIdx, endIdx, getVisibleRecords());
 
     renderCollisionMatrix(endData.pairs, startData.pairs);
-    renderSectionTable(endData.records, startData);
+    renderSectionTable(endData.records, startData, endData.files);
 
     const allPoints = visiblePoints;
     function applyZoom(points, selectedStartIdx, selectedEndIdx, zoom) {
@@ -1180,6 +1270,7 @@ function setActiveFolder(index) {
     folderDropdownLabel.textContent = folder.name;
     rebuildFolderDropdown();
     pinnedDisciplines = new Set();
+    expandedSections = new Set();
     activeFolderRecords = folder.records;
     archivePoints = folder.archivePoints;
 
@@ -1190,6 +1281,7 @@ function setActiveFolder(index) {
     setDefaultDates();
     updateDashboard();
     updateExportButtonState();
+    updatePdfButtonState();
 }
 
 function resetDashboard() {
@@ -1201,6 +1293,7 @@ function resetDashboard() {
     activeFolderRecords = [];
     archivePoints = [];
     pinnedDisciplines = new Set();
+    expandedSections = new Set();
     disciplineFilterList.innerHTML = '';
     disciplineFilter = new Set();
     totalCollisions = 'N';
@@ -1230,12 +1323,19 @@ function resetDashboard() {
 
     renderComparisonStats(null, null);
     updateExportButtonState();
+    updatePdfButtonState();
     updateZoomButtonVisibility();
 }
 
 // ===== Выбор папки через File System Access API =====
 
-async function pickFolderWithWriteAccess() {
+/**
+ * Выбор папки через системный диалог (Chrome/Edge, https или localhost).
+ * В отличие от <input webkitdirectory>, браузер НЕ перечисляет заранее все
+ * файлы папки (и не показывает "будет загружено N файлов") — код сам читает
+ * только нужное, см. collectFilesFromDirectoryHandle.
+ */
+async function pickFolderWithDirectoryPicker() {
     let dirHandle;
     try { dirHandle = await window.showDirectoryPicker(); } catch (e) { return; }
     const files = [];
@@ -1243,14 +1343,21 @@ async function pickFolderWithWriteAccess() {
     addFolder(dirHandle.name, files, dirHandle);
 }
 
+/**
+ * Читает ТОЛЬКО нужные файлы: .xml прямо в выбранной папке и .json прямо в
+ * её подпапке "!АРХИВ". Остальные вложенные папки не обходятся вовсе.
+ */
 async function collectFilesFromDirectoryHandle(dirHandle, prefix, results) {
-    const path = prefix ? `${prefix}/${dirHandle.name}` : dirHandle.name;
+    const isRoot = !prefix;
+    const path = isRoot ? dirHandle.name : `${prefix}/${dirHandle.name}`;
+    const wantedExtension = isRoot ? '.xml' : '.json';
     for await (const [name, handle] of dirHandle.entries()) {
         if (handle.kind === 'file') {
+            if (!name.toLowerCase().endsWith(wantedExtension)) continue;
             const file = await handle.getFile();
             Object.defineProperty(file, 'webkitRelativePath', { value: `${path}/${name}`, configurable: true });
             results.push(file);
-        } else if (handle.kind === 'directory') {
+        } else if (handle.kind === 'directory' && isRoot && name === ARCHIVE_FOLDER_NAME) {
             await collectFilesFromDirectoryHandle(handle, path, results);
         }
     }
@@ -1292,17 +1399,28 @@ async function addDroppedDirectoryHandle(dirHandle) {
     if (files.length) await addFolder(dirHandle.name, files, canWrite ? dirHandle : null);
 }
 
-async function collectFilesFromEntry(entry, prefix, results) {
+/**
+ * То же ограничение, что и в collectFilesFromDirectoryHandle: depth 0 — сама
+ * перетащенная папка, depth 1 — её содержимое (берём только .xml и заходим
+ * только в "!АРХИВ"), depth 2 — содержимое "!АРХИВ" (только .json)
+ */
+async function collectFilesFromEntry(entry, prefix, results, depth = 0) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const lowerName = entry.name.toLowerCase();
     if (entry.isFile) {
+        const isWanted = (depth === 1 && lowerName.endsWith('.xml'))
+            || (depth === 2 && lowerName.endsWith('.json'));
+        if (!isWanted) return;
         const file = await readEntryAsFile(entry);
         Object.defineProperty(file, 'webkitRelativePath', { value: path, configurable: true });
         results.push(file);
         return;
     }
     if (entry.isDirectory) {
+        const isWanted = depth === 0 || (depth === 1 && entry.name === ARCHIVE_FOLDER_NAME);
+        if (!isWanted) return;
         const children = await readAllDirectoryEntries(entry);
-        for (const child of children) await collectFilesFromEntry(child, path, results);
+        for (const child of children) await collectFilesFromEntry(child, path, results, depth + 1);
     }
 }
 
@@ -1357,7 +1475,14 @@ async function exportReport() {
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const year = today.getFullYear();
     const fileName = `${folder.name}_${day}-${month}-${year}.json`;
-    const reportData = { total: folder.total, sections, pairs, guids };
+    // список файлов — для раскрывающихся строк "Таблицы по разделам" на архивных датах
+    const files = folder.records.map((record) => ({
+        fileName: record.fileName,
+        discipline1: record.discipline1,
+        discipline2: record.discipline2,
+        total: record.total,
+    }));
+    const reportData = { total: folder.total, sections, pairs, guids, files };
 
     btnExportReport.disabled = true;
     btnExportReport.textContent = 'Сохранение...';
@@ -1376,6 +1501,116 @@ async function exportReport() {
     } finally {
         btnExportReport.textContent = 'Выгрузить отчёт';
         updateExportButtonState();
+    }
+}
+
+// ===== Выгрузка в PDF =====
+
+/**
+ * Кнопка активна, только когда выбрана папка
+ */
+function updatePdfButtonState() {
+    if (!btnExportPdf) return;
+    const hasFolder = Boolean(folders[activeFolderIndex]);
+    btnExportPdf.disabled = !hasFolder;
+    btnExportPdf.title = hasFolder ? '' : 'Выберите папку с XML-отчётами';
+}
+
+/**
+ * Шапка PDF — собирается из текущих значений сайдбара (вставляется только в
+ * копию страницы, которую рисует html2canvas, на сам сайт не влияет)
+ */
+function buildPdfHeader(targetDocument, folder) {
+    const today = new Date();
+    const dateText = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
+    const checkedDisciplines = Array.from(disciplineFilterList.querySelectorAll('.discipline-filter__checkbox'))
+        .filter((checkbox) => checkbox.checked)
+        .map((checkbox) => checkbox.value);
+    const allDisciplinesCount = disciplineFilterList.querySelectorAll('.discipline-filter__checkbox').length;
+    const filterText = checkedDisciplines.length === allDisciplinesCount ? 'все разделы' : (checkedDisciplines.join(', ') || '—');
+
+    const header = targetDocument.createElement('div');
+    header.className = 'pdf-header';
+    header.innerHTML = `
+        <div class="pdf-header__title">Отчёт по коллизиям — ${escapeHtml(folder.name)}</div>
+        <div class="pdf-header__line">Дата формирования: ${dateText} · Период: ${escapeHtml(startDateLabel.textContent)} — ${escapeHtml(endDateLabel.textContent)} · Фильтр: ${escapeHtml(filterText)}</div>
+        <div class="pdf-header__line">
+            Всего: <b>${escapeHtml(totalCollisionsValue.textContent)}</b> ·
+            Изменение: <b>${escapeHtml(changePercentValue.textContent)}</b> ·
+            За период: <b>${escapeHtml(periodDeltaValue.textContent)}</b> ·
+            Активные: <b>${escapeHtml(document.getElementById('active').textContent)}</b> ·
+            Новые: <b>${escapeHtml(document.getElementById('new').textContent)}</b> ·
+            Решённые: <b>${escapeHtml(document.getElementById('resolved').textContent)}</b>
+        </div>
+    `;
+    return header;
+}
+
+/**
+ * html2canvas рисует <svg> через сериализацию, и правила из style.css внутрь
+ * SVG не попадают (линии графиков заливались бы чёрным) — поэтому переносим
+ * вычисленные стили в атрибут style каждого элемента SVG в копии страницы
+ */
+function inlineSvgStyles(targetDocument) {
+    const view = targetDocument.defaultView;
+    const properties = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linejoin', 'stroke-linecap',
+        'opacity', 'display', 'font-family', 'font-size', 'font-weight'];
+    targetDocument.querySelectorAll('svg, svg *').forEach((element) => {
+        const computed = view.getComputedStyle(element);
+        properties.forEach((property) => {
+            element.style.setProperty(property, computed.getPropertyValue(property));
+        });
+    });
+}
+
+async function exportPdf() {
+    const folder = folders[activeFolderIndex];
+    if (!folder) return;
+    if (typeof window.html2canvas !== 'function' || !window.jspdf) {
+        alert('Не удалось загрузить библиотеки для PDF — проверьте подключение к интернету и обновите страницу.');
+        return;
+    }
+
+    hideChartTooltip();
+    btnExportPdf.disabled = true;
+    btnExportPdf.textContent = 'Формирование PDF...';
+    try {
+        const content = document.querySelector('.content');
+        const canvas = await window.html2canvas(content, {
+            scale: 2,
+            backgroundColor: getComputedStyle(document.querySelector('.main-conteiner')).backgroundColor,
+            ignoreElements: (element) => element.classList && element.classList.contains('btn-zoom-last-five'),
+            onclone: (clonedDocument) => {
+                const clonedContent = clonedDocument.querySelector('.content');
+                // шапка — отдельной строкой сетки над плитками, высоты плиток не меняются
+                clonedContent.style.gridTemplateRows = 'auto 35vh 60vh 40vh';
+                clonedContent.style.gridTemplateAreas = '"pdf-header pdf-header" "total-chart total-chart" "collision-matrix section-table" "discipline-chart discipline-chart"';
+                clonedContent.insertBefore(buildPdfHeader(clonedDocument, folder), clonedContent.firstChild);
+                inlineSvgStyles(clonedDocument);
+            },
+        });
+
+        // одна страница шириной A4 (297 мм), высота — по пропорциям снимка,
+        // чтобы плитки не разрезались между страницами
+        const pageWidth = 297;
+        const pageHeight = canvas.height * pageWidth / canvas.width;
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({
+            orientation: pageWidth >= pageHeight ? 'landscape' : 'portrait',
+            unit: 'mm',
+            format: [pageWidth, pageHeight],
+        });
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageWidth, pageHeight);
+
+        const today = new Date();
+        const dateKey = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+        pdf.save(`${folder.name}_${dateKey}.pdf`);
+    } catch (error) {
+        console.error('Не удалось сформировать PDF:', error);
+        alert('Не удалось сформировать PDF — подробности в консоли (F12).');
+    } finally {
+        btnExportPdf.textContent = 'Выгрузить в PDF';
+        updatePdfButtonState();
     }
 }
 
@@ -1421,7 +1656,10 @@ function updateZoomButtonVisibility() {
 // ===== Обработчики событий =====
 
 btnSelectFolder.addEventListener('click', () => {
-    if (canWriteFiles) pickFolderWithWriteAccess();
+    // системный диалог выбора папки — в обеих версиях страницы, где он
+    // доступен; <input webkitdirectory> — запасной вариант (file://, Firefox),
+    // там браузер сам перечисляет ВСЕ файлы папки, включая вложенные
+    if (supportsDirectoryPicker && isSecureLocalContext) pickFolderWithDirectoryPicker();
     else xmlFileInput.click();
 });
 
@@ -1485,6 +1723,8 @@ if (btnExportReport) {
     if (canWriteFiles) btnExportReport.addEventListener('click', exportReport);
     else btnExportReport.disabled = true;
 }
+
+if (btnExportPdf) btnExportPdf.addEventListener('click', exportPdf);
 
 document.addEventListener('dragenter', (event) => {
     if (!event.dataTransfer.types.includes('Files')) return;
@@ -1632,4 +1872,5 @@ document.addEventListener('dblclick', function(event) {
 addZoomToLastFiveButton();
 setupTotalChartInteractions();
 setupDisciplineChartInteractions();
+setupSectionTableInteractions();
 resetDashboard();

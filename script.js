@@ -72,7 +72,6 @@ const disciplineFilterList = document.getElementById('discipline-filter-list');
 
 let folders = [];
 let activeFolderIndex = -1;
-let activeFolderRecords = [];
 let archivePoints = [];
 let pinnedDisciplines = new Set();
 let expandedSections = new Set(); // разделы, раскрытые в "Таблице по разделам"
@@ -219,13 +218,6 @@ function parseDisciplinePair(fileName) {
 
 // ===== Чтение файлов выбранной папки =====
 
-function isCurrentXmlFile(file) {
-    if (!file.name.toLowerCase().endsWith('.xml')) return false;
-    const relativePath = file.webkitRelativePath || '';
-    if (!relativePath) return true;
-    return relativePath.split('/').length === 2;
-}
-
 function collectClashGuids(file) {
     return file.text().then((text) => {
         const xmlDoc = new DOMParser().parseFromString(text, 'application/xml');
@@ -354,14 +346,6 @@ function isDisciplineVisible(discipline) {
 function filterRecordsByDiscipline(records) {
     if (disciplineFilter.size === KNOWN_DISCIPLINES.length) return records;
     return records.filter((record) => isDisciplineVisible(record.discipline1) && isDisciplineVisible(record.discipline2));
-}
-
-function getVisibleRecords() {
-    return filterRecordsByDiscipline(activeFolderRecords);
-}
-
-function getVisibleTotal() {
-    return getVisibleRecords().reduce((sum, record) => sum + record.total, 0);
 }
 
 function getFilteredArchivePoint(point) {
@@ -608,11 +592,10 @@ function setupSectionTableInteractions() {
 
 // ===== Графики =====
 
-function renderTotalChart(points, startIdx, endIdx, currentTotal) {
-        totalChartBody.innerHTML = '';
+function renderTotalChart(points, startIdx, endIdx) {
+    totalChartBody.innerHTML = '';
     if (!points.length) return;
     const chartPoints = points.map((p) => ({ label: p.key, value: p.total }));
-    chartPoints.push({ label: 'Сейчас', value: currentTotal });
 
     const width = 1300, height = 240;
     const padding = { top: 16, right: 20, bottom: 45, left: 40 };
@@ -630,7 +613,6 @@ function renderTotalChart(points, startIdx, endIdx, currentTotal) {
         value: p.value,
         index: i,
     }));
-    const nowIndex = coords.length - 1;
 
     // Индексы для подписей дат (максимум 5)
     let labelIndices = [];
@@ -673,12 +655,11 @@ function renderTotalChart(points, startIdx, endIdx, currentTotal) {
     // Точки
     let markers = '';
     coords.forEach((coord, index) => {
-        const isNow = index === nowIndex;
         const isStart = index === startIdx;
         const isEnd = index === endIdx;
         const isSelected = isStart || isEnd;
-        const pointClass = isNow ? ' chart-point--now' : (isSelected ? ' chart-point--selected' : '');
-        markers += `<circle cx="${coord.x}" cy="${coord.y}" r="${isNow || isSelected ? 5 : 3}" class="chart-point${pointClass}" data-index="${index}" data-label="${coord.label}" data-value="${coord.value}" data-cx="${coord.x}" data-cy="${coord.y}" />`;
+        const pointClass = isSelected ? ' chart-point--selected' : '';
+        markers += `<circle cx="${coord.x}" cy="${coord.y}" r="${isSelected ? 5 : 3}" class="chart-point${pointClass}" data-index="${index}" data-label="${coord.label}" data-value="${coord.value}" data-cx="${coord.x}" data-cy="${coord.y}" />`;
     });
 
     // Линия-указатель при наведении
@@ -706,10 +687,10 @@ function renderTotalChart(points, startIdx, endIdx, currentTotal) {
 
 // ===== График динамики по разделам (с сеткой и подписями) =====
 
-function renderDisciplineChart(points, startIdx, endIdx, records) {
+function renderDisciplineChart(points, startIdx, endIdx) {
     disciplineChartBody.innerHTML = '';
     if (!points.length) return;
-    const allRecords = [...records, ...points.flatMap(p => sectionsToClashRecords(p.sections))];
+    const allRecords = points.flatMap(p => sectionsToClashRecords(p.sections));
     let disciplines = getPresentDisciplines(allRecords);
     // Сортируем по алфавиту
     disciplines = disciplines.slice().sort((a, b) => a.localeCompare(b));
@@ -718,7 +699,6 @@ function renderDisciplineChart(points, startIdx, endIdx, records) {
     // Подготовка данных линий
     const series = disciplines.map(d => {
         const values = points.map(p => p.sections[d] || 0);
-        values.push(getDisciplineTotal(records, d));
         return { discipline: d, values };
     });
     series.forEach(line => {
@@ -733,9 +713,9 @@ function renderDisciplineChart(points, startIdx, endIdx, records) {
     const chartHeight = height - padding.top - padding.bottom;
     const chartBottom = padding.top + chartHeight;
     const maxValue = Math.max(1, ...series.flatMap(line => line.values));
-    const pointsCount = points.length + 1;
+    const pointsCount = points.length;
     const stepX = pointsCount > 1 ? chartWidth / (pointsCount - 1) : 0;
-    const axisLabels = points.map(p => p.key).concat('Сейчас');
+    const axisLabels = points.map(p => p.key);
 
     // Сетка Y (4 горизонтальные линии с подписями)
     const yTickCount = 4;
@@ -980,30 +960,12 @@ function setupTotalChartInteractions() {
 
 // ===== Работа с датами =====
 
+/**
+ * Все данные дашборда берутся ТОЛЬКО из JSON-отчётов папки "!АРХИВ":
+ * index — номер отчёта в archivePoints (отсортированы по дате из имени файла).
+ * Точки "Сейчас" нет — XML-файлы сайт не читает (кроме выгрузки отчёта).
+ */
 function getDataForDate(index) {
-    if (index === -1) {
-        const visibleRecords = getVisibleRecords();
-        const disciplines = getPresentDisciplines(visibleRecords);
-        const sections = {};
-        disciplines.forEach(d => { sections[d] = getDisciplineTotal(visibleRecords, d); });
-        const pairs = {};
-        const matrix = buildCollisionMatrix(visibleRecords, disciplines);
-        disciplines.forEach((row, ri) => {
-            disciplines.forEach((col, ci) => {
-                if (ci < ri) return;
-                pairs[getPairKey(row, col)] = matrix[row][col];
-            });
-        });
-        const guidEntries = getGuidEntries(visibleRecords);
-        return {
-            records: visibleRecords,
-            total: visibleRecords.reduce((s, r) => s + r.total, 0),
-            sections,
-            pairs,
-            guidEntries,
-            files: visibleRecords,
-        };
-    }
     const point = archivePoints[index];
     if (!point) return null;
     const filtered = getFilteredArchivePoint(point);
@@ -1019,7 +981,6 @@ function getDataForDate(index) {
 
 function rebuildDateDropdowns() {
     const options = archivePoints.map((p, i) => ({ label: p.key, value: i }));
-    options.push({ label: 'Сейчас', value: -1 });
 
     startDateList.innerHTML = '';
     options.forEach(opt => {
@@ -1061,16 +1022,8 @@ function updateDateDropdownOptions() {
     const startItems = startDateList.querySelectorAll('.folder-dropdown__item');
     startItems.forEach(btn => {
         const val = parseInt(btn.dataset.value);
-        let enabled = true;
-        if (endDateIndex !== undefined && endDateIndex !== null) {
-            if (endDateIndex === -1) {
-                enabled = true;
-            } else if (val === -1) {
-                enabled = false;
-            } else {
-                enabled = val <= endDateIndex;
-            }
-        }
+        // начальная дата не может быть позже конечной
+        const enabled = val <= endDateIndex;
         btn.disabled = !enabled;
         btn.style.opacity = enabled ? '1' : '0.4';
         btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
@@ -1079,16 +1032,8 @@ function updateDateDropdownOptions() {
     const endItems = endDateList.querySelectorAll('.folder-dropdown__item');
     endItems.forEach(btn => {
         const val = parseInt(btn.dataset.value);
-        let enabled = true;
-        if (startDateIndex !== undefined && startDateIndex !== null) {
-            if (startDateIndex === -1) {
-                enabled = (val === -1);
-            } else if (val === -1) {
-                enabled = true;
-            } else {
-                enabled = val >= startDateIndex;
-            }
-        }
+        // конечная дата не может быть раньше начальной
+        const enabled = val >= startDateIndex;
         btn.disabled = !enabled;
         btn.style.opacity = enabled ? '1' : '0.4';
         btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
@@ -1096,10 +1041,8 @@ function updateDateDropdownOptions() {
 }
 
 function updateDateLabels() {
-    const startLabel = startDateIndex === -1 ? 'Сейчас' : (archivePoints[startDateIndex] ? archivePoints[startDateIndex].key : '-');
-    startDateLabel.textContent = startLabel;
-    const endLabel = endDateIndex === -1 ? 'Сейчас' : (archivePoints[endDateIndex] ? archivePoints[endDateIndex].key : '-');
-    endDateLabel.textContent = endLabel;
+    startDateLabel.textContent = archivePoints[startDateIndex] ? archivePoints[startDateIndex].key : '-';
+    endDateLabel.textContent = archivePoints[endDateIndex] ? archivePoints[endDateIndex].key : '-';
 }
 
 function selectStartDate(value) {
@@ -1127,13 +1070,10 @@ function selectEndDate(value) {
 }
 
 function setDefaultDates() {
-    if (archivePoints.length === 0) {
-        startDateIndex = -1;
-        endDateIndex = -1;
-    } else {
-        startDateIndex = archivePoints.length - 1;
-        endDateIndex = -1;
-    }
+    // по умолчанию: предпоследний отчёт -> последний (если отчёт один — он же
+    // и начальная, и конечная дата; если отчётов нет — оба индекса -1)
+    endDateIndex = archivePoints.length - 1;
+    startDateIndex = Math.max(endDateIndex - 1, Math.min(endDateIndex, 0));
     rebuildDateDropdowns();
     updateDateDropdownOptions();
     updateDateLabels();
@@ -1157,7 +1097,10 @@ function updateDashboard() {
 
     const startData = getDataForDate(startDateIndex);
     const endData = getDataForDate(endDateIndex);
-    if (!startData || !endData) {
+    // "всего" и процент — всегда по ПОСЛЕДНЕМУ отчёту в "!АРХИВ" (последний
+    // по дате в имени файла), независимо от выбранной конечной даты
+    const latestData = getDataForDate(archivePoints.length - 1);
+    if (!startData || !endData || !latestData) {
         totalCollisionsValue.textContent = '—';
         changePercentValue.textContent = '—';
         periodDeltaValue.textContent = '—';
@@ -1170,7 +1113,7 @@ function updateDashboard() {
         return;
     }
 
-    const totalCurrent = getVisibleTotal();
+    const totalCurrent = latestData.total;
     totalCollisionsValue.textContent = totalCurrent;
 
     const startTotal = startData.total;
@@ -1190,19 +1133,15 @@ function updateDashboard() {
     renderComparisonStats(startData, endData);
 
     const visiblePoints = archivePoints.map(getFilteredArchivePoint);
-    const nowIndex = archivePoints.length;
-    const startIdx = startDateIndex === -1 ? nowIndex : startDateIndex;
-    const endIdx = endDateIndex === -1 ? nowIndex : endDateIndex;
-
-    renderTotalChart(visiblePoints, startIdx, endIdx, totalCurrent);
-    renderDisciplineChart(visiblePoints, startIdx, endIdx, getVisibleRecords());
+    const startIdx = startDateIndex;
+    const endIdx = endDateIndex;
 
     renderCollisionMatrix(endData.pairs, startData.pairs);
     renderSectionTable(endData.records, startData, endData.files);
 
     const allPoints = visiblePoints;
     function applyZoom(points, selectedStartIdx, selectedEndIdx, zoom) {
-        const total = points.length + 1;
+        const total = points.length;
         let start = zoom.start;
         let end = (zoom.end !== null) ? zoom.end : total - 1;
         if (zoom.end === null || (start === 0 && end === total - 1)) {
@@ -1218,21 +1157,27 @@ function updateDashboard() {
     const totalZoomed = applyZoom(allPoints, startIdx, endIdx, zoomState.total);
     const disciplineZoomed = applyZoom(allPoints, startIdx, endIdx, zoomState.discipline);
 
-    renderTotalChart(totalZoomed.points, totalZoomed.startIdx, totalZoomed.endIdx, totalCurrent);
-    renderDisciplineChart(disciplineZoomed.points, disciplineZoomed.startIdx, disciplineZoomed.endIdx, getVisibleRecords());
+    renderTotalChart(totalZoomed.points, totalZoomed.startIdx, totalZoomed.endIdx);
+    renderDisciplineChart(disciplineZoomed.points, disciplineZoomed.startIdx, disciplineZoomed.endIdx);
 
     updateZoomButtonVisibility();
 }
 
 // ===== Управление списком папок =====
 
+/**
+ * Папка добавляется только по JSON-отчётам из "!АРХИВ" — XML-файлы здесь не
+ * читаются вовсе (их читает только exportReport в момент выгрузки отчёта).
+ */
 function addFolder(name, allFiles, dirHandle = null) {
-    const currentFiles = allFiles.filter(isCurrentXmlFile);
-    return Promise.all([
-        buildClashRecords(currentFiles),
-        buildArchivePoints(allFiles, name),
-    ]).then(([records, points]) => {
-        const folder = { name, records, archivePoints: points, total: records.reduce((s, r) => s + r.total, 0), dirHandle };
+    return buildArchivePoints(allFiles, name).then((points) => {
+        // без отчётов показывать нечего; в административной версии папку всё
+        // равно добавляем — чтобы можно было выгрузить первый отчёт
+        if (!points.length && !(canWriteFiles && dirHandle)) {
+            alert(`В папке "${name}" не найдена подпапка "${ARCHIVE_FOLDER_NAME}" с отчётами вида "${name}_дд-мм-гггг.json".`);
+            return;
+        }
+        const folder = { name, archivePoints: points, dirHandle };
         const existingIndex = folders.findIndex(f => f.name === name);
         if (existingIndex === -1) folders.push(folder);
         else folders[existingIndex] = folder;
@@ -1271,10 +1216,9 @@ function setActiveFolder(index) {
     rebuildFolderDropdown();
     pinnedDisciplines = new Set();
     expandedSections = new Set();
-    activeFolderRecords = folder.records;
     archivePoints = folder.archivePoints;
 
-    const allRecordsForFilters = [...folder.records, ...folder.archivePoints.flatMap(p => sectionsToClashRecords(p.sections))];
+    const allRecordsForFilters = folder.archivePoints.flatMap(p => sectionsToClashRecords(p.sections));
     const disciplinesForFilters = getPresentDisciplines(allRecordsForFilters);
     rebuildDisciplineFilters(disciplinesForFilters);
 
@@ -1290,7 +1234,6 @@ function resetDashboard() {
 
     folders = [];
     activeFolderIndex = -1;
-    activeFolderRecords = [];
     archivePoints = [];
     pinnedDisciplines = new Set();
     expandedSections = new Set();
@@ -1344,23 +1287,37 @@ async function pickFolderWithDirectoryPicker() {
 }
 
 /**
- * Читает ТОЛЬКО нужные файлы: .xml прямо в выбранной папке и .json прямо в
- * её подпапке "!АРХИВ". Остальные вложенные папки не обходятся вовсе.
+ * Читает ТОЛЬКО .json из подпапки "!АРХИВ" выбранной папки: папка ищется по
+ * имени напрямую (без перебора содержимого), остальные файлы и вложенные
+ * папки не затрагиваются вовсе.
  */
 async function collectFilesFromDirectoryHandle(dirHandle, prefix, results) {
-    const isRoot = !prefix;
-    const path = isRoot ? dirHandle.name : `${prefix}/${dirHandle.name}`;
-    const wantedExtension = isRoot ? '.xml' : '.json';
+    let archiveHandle;
+    try {
+        archiveHandle = await dirHandle.getDirectoryHandle(ARCHIVE_FOLDER_NAME);
+    } catch (e) {
+        return; // папки "!АРХИВ" нет
+    }
+    const path = `${dirHandle.name}/${ARCHIVE_FOLDER_NAME}`;
+    for await (const [name, handle] of archiveHandle.entries()) {
+        if (handle.kind !== 'file' || !name.toLowerCase().endsWith('.json')) continue;
+        const file = await handle.getFile();
+        Object.defineProperty(file, 'webkitRelativePath', { value: `${path}/${name}`, configurable: true });
+        results.push(file);
+    }
+}
+
+/**
+ * .xml верхнего уровня папки — читаются только в момент выгрузки отчёта
+ */
+async function collectXmlFilesFromDirectoryHandle(dirHandle) {
+    const files = [];
     for await (const [name, handle] of dirHandle.entries()) {
-        if (handle.kind === 'file') {
-            if (!name.toLowerCase().endsWith(wantedExtension)) continue;
-            const file = await handle.getFile();
-            Object.defineProperty(file, 'webkitRelativePath', { value: `${path}/${name}`, configurable: true });
-            results.push(file);
-        } else if (handle.kind === 'directory' && isRoot && name === ARCHIVE_FOLDER_NAME) {
-            await collectFilesFromDirectoryHandle(handle, path, results);
+        if (handle.kind === 'file' && name.toLowerCase().endsWith('.xml')) {
+            files.push(await handle.getFile());
         }
     }
+    return files;
 }
 
 // ===== Drag & Drop =====
@@ -1384,7 +1341,7 @@ async function handleDroppedItems(dataTransferItems) {
         if (!entry || !entry.isDirectory) continue;
         const files = [];
         await collectFilesFromEntry(entry, '', files);
-        if (files.length) await addFolder(entry.name, files);
+        await addFolder(entry.name, files);
     }
 }
 
@@ -1396,20 +1353,19 @@ async function addDroppedDirectoryHandle(dirHandle) {
     } catch (e) { canWrite = false; }
     const files = [];
     await collectFilesFromDirectoryHandle(dirHandle, '', files);
-    if (files.length) await addFolder(dirHandle.name, files, canWrite ? dirHandle : null);
+    await addFolder(dirHandle.name, files, canWrite ? dirHandle : null);
 }
 
 /**
  * То же ограничение, что и в collectFilesFromDirectoryHandle: depth 0 — сама
- * перетащенная папка, depth 1 — её содержимое (берём только .xml и заходим
- * только в "!АРХИВ"), depth 2 — содержимое "!АРХИВ" (только .json)
+ * перетащенная папка, depth 1 — её содержимое (заходим только в "!АРХИВ",
+ * файлы не трогаем), depth 2 — содержимое "!АРХИВ" (только .json)
  */
 async function collectFilesFromEntry(entry, prefix, results, depth = 0) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
     const lowerName = entry.name.toLowerCase();
     if (entry.isFile) {
-        const isWanted = (depth === 1 && lowerName.endsWith('.xml'))
-            || (depth === 2 && lowerName.endsWith('.json'));
+        const isWanted = depth === 2 && lowerName.endsWith('.json');
         if (!isWanted) return;
         const file = await readEntryAsFile(entry);
         Object.defineProperty(file, 'webkitRelativePath', { value: path, configurable: true });
@@ -1458,10 +1414,33 @@ async function exportReport() {
         alert('Нет доступа на запись для этой папки — выберите её заново кнопкой "Выбрать папку с XML-отчётами".');
         return;
     }
-    const disciplines = getPresentDisciplines(folder.records);
+    // XML-файлы читаются только здесь, в момент выгрузки: дашборд строится
+    // исключительно по JSON-отчётам из "!АРХИВ"
+    btnExportReport.disabled = true;
+    btnExportReport.textContent = 'Чтение XML...';
+    let records;
+    try {
+        const xmlFiles = await collectXmlFilesFromDirectoryHandle(folder.dirHandle);
+        if (!xmlFiles.length) {
+            alert('В выбранной папке не найдено ни одного .xml-файла верхнего уровня (только в самой папке, не во вложенных).');
+            btnExportReport.textContent = 'Выгрузить отчёт';
+            updateExportButtonState();
+            return;
+        }
+        records = await buildClashRecords(xmlFiles);
+    } catch (error) {
+        console.error('Не удалось прочитать XML-файлы:', error);
+        alert('Не удалось прочитать XML-файлы — подробности в консоли (F12).');
+        btnExportReport.textContent = 'Выгрузить отчёт';
+        updateExportButtonState();
+        return;
+    }
+    const total = records.reduce((sum, record) => sum + record.total, 0);
+
+    const disciplines = getPresentDisciplines(records);
     const sections = {};
-    disciplines.forEach(d => { sections[d] = getDisciplineTotal(folder.records, d); });
-    const matrix = buildCollisionMatrix(folder.records, disciplines);
+    disciplines.forEach(d => { sections[d] = getDisciplineTotal(records, d); });
+    const matrix = buildCollisionMatrix(records, disciplines);
     const pairs = {};
     disciplines.forEach((row, ri) => {
         disciplines.forEach((col, ci) => {
@@ -1469,20 +1448,20 @@ async function exportReport() {
             pairs[getPairKey(row, col)] = matrix[row][col];
         });
     });
-    const guids = getGuidEntries(folder.records);
+    const guids = getGuidEntries(records);
     const today = new Date();
     const day = String(today.getDate()).padStart(2, '0');
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const year = today.getFullYear();
     const fileName = `${folder.name}_${day}-${month}-${year}.json`;
     // список файлов — для раскрывающихся строк "Таблицы по разделам" на архивных датах
-    const files = folder.records.map((record) => ({
+    const files = records.map((record) => ({
         fileName: record.fileName,
         discipline1: record.discipline1,
         discipline2: record.discipline2,
         total: record.total,
     }));
-    const reportData = { total: folder.total, sections, pairs, guids, files };
+    const reportData = { total, sections, pairs, guids, files };
 
     btnExportReport.disabled = true;
     btnExportReport.textContent = 'Сохранение...';
@@ -1627,7 +1606,7 @@ function addZoomToLastFiveButton() {
     btn.textContent = 'Приблизить последние пять';
     btn.addEventListener('click', function(e) {
         e.stopPropagation();
-        const totalPoints = archivePoints.length + 1;
+        const totalPoints = archivePoints.length;
         if (totalPoints <= 1) return;
         const maxPointsToShow = Math.min(totalPoints, 5);
         const start = totalPoints - maxPointsToShow;
@@ -1645,7 +1624,7 @@ function addZoomToLastFiveButton() {
 function updateZoomButtonVisibility() {
     const btn = document.querySelector('.btn-zoom-last-five');
     if (!btn) return;
-    const totalPoints = archivePoints.length + 1;
+    const totalPoints = archivePoints.length;
     if (totalPoints > 1) {
         btn.style.display = 'inline-block';
     } else {
@@ -1802,7 +1781,7 @@ document.addEventListener('wheel', function(event) {
     const svg = target.closest('svg');
     if (!svg) return;
 
-    const totalPoints = archivePoints.length + 1;
+    const totalPoints = archivePoints.length;
     if (totalPoints <= 1) return;
 
     const rect = svg.getBoundingClientRect();

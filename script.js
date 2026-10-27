@@ -1,31 +1,20 @@
 // ===== Константы =====
 
 /**
- * Известные коды разделов проекта — по ним из имени XML-файла определяется
- * пара конфликтующих разделов
+ * Известные коды разделов проекта — только они попадают в фильтр разделов
  */
 const KNOWN_DISCIPLINES = ["АР", "КР", "ВК", "ЭОМ", "ВиК", "ОТМ", "СС", "АПТ-ВПВ", "КЖ", "АУПТ", "ИТП"];
 
 /**
- * Те же коды, отсортированные от длинных к коротким: искать надо сначала
- * длинные, иначе "АПТ-ВПВ" будет распознан как более короткий код внутри него
- */
-const DISCIPLINES_BY_LENGTH = [...KNOWN_DISCIPLINES].sort((a, b) => b.length - a.length);
-
-/**
- * Подставляется вместо раздела, если разобрать имя файла не удалось
+ * Подставляется вместо раздела, если в отчёте он не указан
  */
 const NOT_DEFINED = "Не опр.";
 
 /**
- * Отрезает ведущий "<номер>_" и/или замыкающий "_<номер>" от имени файла
- */
-const FILE_NAME_NUMBER_RE = /^\d+(\.\d+)?_|_\d+(\.\d+)?$/g;
-
-/**
- * Название подпапки с архивом (лежит прямо внутри выбранной папки). Внутри —
- * ПЛОСКО, без вложенных папок по датам — лежат JSON-отчёты вида
- * "<имя папки>_дд-мм-гггг.json" (см. exportReport, кнопка "Выгрузить отчёт").
+ * Название папки с архивом. Пользователь выбирает одну папку (обычно
+ * "03-Проверки"); в каждой её НЕПОСРЕДСТВЕННОЙ подпапке лежит "!АРХИВ", а в
+ * нём — ПЛОСКО, без вложенных папок по датам — JSON-отчёты вида
+ * "<имя подпапки>_дд-мм-гггг.json" (их выгружает отдельный exe).
  */
 const ARCHIVE_FOLDER_NAME = '!АРХИВ';
 
@@ -34,19 +23,44 @@ const ARCHIVE_FOLDER_NAME = '!АРХИВ';
  */
 const REPORT_FILE_NAME_RE = /^(.+)_(\d{2})-(\d{2})-(\d{4})\.json$/i;
 
+/**
+ * Отступы области построения графиков (в единицах viewBox) — общие для обоих
+ * графиков и для расчёта точки под курсором при зуме
+ */
+// left — место под числа оси Y (шрифт чисел 20px на экране, см. fitChartTextToScreen)
+const CHART_PADDING = { top: 16, right: 20, bottom: 45, left: 60 };
+
+/**
+ * Подписи дат под осью X: первая — от точки вправо, последняя — от точки
+ * влево, остальные — по центру; иначе крайние даты обрезаются краем графика
+ */
+function getDateLabelAnchor(index, count) {
+    if (count > 1 && index === 0) return 'start';
+    if (count > 1 && index === count - 1) return 'end';
+    return 'middle';
+}
+
+/**
+ * На каком расстоянии от точки графика (в экранных пикселях) уже показывается
+ * подсказка
+ */
+const TOOLTIP_HIT_RADIUS = 15;
+
 // ===== Элементы страницы =====
 
 const totalCollisionsValue = document.getElementById('total-collisions-value');
 const changePercentValue = document.getElementById('change-percent-value');
 const periodDeltaValue = document.getElementById('period-delta-value');
 
-const xmlFileInput = document.getElementById('xml-file-input');
+const projectNameTitle = document.getElementById('project-name');
+const folderInput = document.getElementById('folder-input');
 const btnSelectFolder = document.getElementById('btn-select-folder');
-const btnClearFolders = document.getElementById('btn-clear-folders');
-const folderDropdown = document.getElementById('folder-dropdown');
-const folderDropdownToggle = document.getElementById('folder-dropdown-toggle');
-const folderDropdownLabel = document.getElementById('folder-dropdown-label');
-const folderDropdownList = document.getElementById('folder-dropdown-list');
+const folderFilter = document.getElementById('folder-filter');
+const folderFilterToggle = document.getElementById('folder-filter-toggle');
+const folderFilterLabel = document.getElementById('folder-filter-label');
+const folderFilterPanel = document.getElementById('folder-filter-panel');
+const folderFilterAll = document.getElementById('folder-filter-all');
+const folderFilterOptions = document.getElementById('folder-filter-options');
 
 const startDateDropdown = document.getElementById('start-date-dropdown');
 const startDateToggle = document.getElementById('start-date-toggle');
@@ -58,7 +72,6 @@ const endDateToggle = document.getElementById('end-date-toggle');
 const endDateLabel = document.getElementById('end-date-label');
 const endDateList = document.getElementById('end-date-list');
 
-const btnExportReport = document.getElementById('btn-export-report');
 const btnExportPdf = document.getElementById('btn-export-pdf');
 
 const collisionMatrixBody = document.getElementById('collision-matrix-body');
@@ -70,9 +83,9 @@ const disciplineFilterList = document.getElementById('discipline-filter-list');
 
 // ===== Состояние =====
 
-let folders = [];
-let activeFolderIndex = -1;
-let archivePoints = [];
+let folders = [];                  // загруженные подпапки: { name, archivePoints }
+let selectedFolderNames = new Set(); // подпапки, отмеченные в фильтре папок
+let archivePoints = [];            // сумма отчётов выбранных подпапок по датам (см. buildAggregatedPoints)
 let pinnedDisciplines = new Set();
 let expandedSections = new Set(); // разделы, раскрытые в "Таблице по разделам"
 let disciplineFilter = new Set();
@@ -83,10 +96,38 @@ let changePercent = 0;
 let dragEnterCounter = 0;
 let chartTooltip = null;
 
-const isSecureLocalContext = (location.protocol === 'https:')
-    || ((location.protocol === 'http:') && (location.hostname === 'localhost' || location.hostname === '127.0.0.1'));
-const supportsDirectoryPicker = typeof window.showDirectoryPicker === 'function';
-const canWriteFiles = Boolean(btnExportReport) && isSecureLocalContext && supportsDirectoryPicker;
+// видимый диапазон точек графиков (Ctrl+колесо); end === null — без зума.
+// Объявлено здесь, вместе с остальным состоянием, а не рядом с обработчиком
+// колеса: resetDashboard/applyFolderSelection обращаются к нему раньше, и
+// при объявлении ниже любая ошибка между ними давала "Cannot access
+// 'zoomState' before initialization"
+let zoomState = {
+    total: { start: 0, end: null },
+    discipline: { start: 0, end: null }
+};
+
+/**
+ * Системный диалог выбора папки (Chrome/Edge). Страница, открытая через
+ * file://, в этих браузерах тоже считается secure context.
+ */
+const canUseDirectoryPicker = window.isSecureContext && typeof window.showDirectoryPicker === 'function';
+
+/**
+ * Название проекта = имя html-файла без расширения: html/css/js копируют в
+ * папку проекта и переименовывают html-файл
+ */
+const projectName = getProjectName();
+
+function getProjectName() {
+    try {
+        const lastSegment = decodeURIComponent(location.pathname.split('/').pop() || '');
+        const name = lastSegment.replace(/\.html?$/i, '').trim();
+        if (name) return name;
+    } catch (e) {
+        // некорректная %-последовательность в адресе — берём заголовок страницы
+    }
+    return document.title;
+}
 
 // ===== Цвета для разделов в графике =====
 
@@ -155,13 +196,21 @@ function setColor(element, value) {
 
 // ===== Сравнение по GUID =====
 
+/**
+ * GUID сравниваются вместе с именем подпапки: при выборе нескольких папок
+ * одинаковые GUID из разных папок — это разные коллизии
+ */
+function getGuidKey(entry) {
+    return `${entry.folderName}|${entry.guid}`;
+}
+
 function computeComparisonStats(startData, endData) {
     if (!startData || !endData) return null;
     if (!startData.guidEntries || !startData.guidEntries.length) return null;
     if (!endData.guidEntries || !endData.guidEntries.length) return null;
 
-    const startGuids = new Set(getFilteredGuidEntriesFromPoint(startData).map(e => e.guid));
-    const endGuids = new Set(getFilteredGuidEntriesFromPoint(endData).map(e => e.guid));
+    const startGuids = new Set(getFilteredGuidEntriesFromPoint(startData).map(getGuidKey));
+    const endGuids = new Set(getFilteredGuidEntriesFromPoint(endData).map(getGuidKey));
 
     let active = 0, freshCount = 0, resolved = 0;
     endGuids.forEach((guid) => {
@@ -181,80 +230,7 @@ function renderComparisonStats(startData, endData) {
     document.getElementById('resolved').textContent = stats ? stats.resolved : '—';
 }
 
-// ===== Разбор пары разделов из имени файла =====
-
-function findDisciplineInPart(part) {
-    const cleaned = part.replace(/^[_ ]+|[_ ]+$/g, '');
-    if (!cleaned) return null;
-    const tokens = cleaned.split('_').filter(Boolean);
-    for (const token of tokens) {
-        if (KNOWN_DISCIPLINES.includes(token)) return token;
-    }
-    for (const code of DISCIPLINES_BY_LENGTH) {
-        if (cleaned.includes(code)) return code;
-    }
-    return null;
-}
-
-function parseDisciplinePair(fileName) {
-    if (!fileName) return [null, null];
-    const trimmed = fileName.replace(FILE_NAME_NUMBER_RE, '');
-    let firstDiscipline = null;
-    let remainder = '';
-    for (const code of DISCIPLINES_BY_LENGTH) {
-        if (trimmed.startsWith(code)) {
-            const nextChar = trimmed.slice(code.length, code.length + 1);
-            if (nextChar === '' || nextChar === '_' || nextChar === '-') {
-                firstDiscipline = code;
-                remainder = trimmed.slice(code.length);
-                break;
-            }
-        }
-    }
-    if (firstDiscipline === null) return [null, null];
-    const secondDiscipline = findDisciplineInPart(remainder);
-    return secondDiscipline ? [firstDiscipline, secondDiscipline] : [null, null];
-}
-
-// ===== Чтение файлов выбранной папки =====
-
-function collectClashGuids(file) {
-    return file.text().then((text) => {
-        const xmlDoc = new DOMParser().parseFromString(text, 'application/xml');
-        if (xmlDoc.querySelector('parsererror')) {
-            console.error(`Не удалось разобрать файл: ${file.name}`);
-            return [];
-        }
-        return Array.from(xmlDoc.getElementsByTagName('clashresult'))
-            .map((node) => node.getAttribute('guid'))
-            .filter(Boolean);
-    });
-}
-
-function buildClashRecords(files) {
-    return Promise.all(files.map((file) => {
-        const nameWithoutExtension = file.name.replace(/\.xml$/i, '');
-        const [firstDiscipline, secondDiscipline] = parseDisciplinePair(nameWithoutExtension);
-        return collectClashGuids(file).then((guids) => ({
-            // имя файла нужно для раскрывающегося списка файлов в "Таблице по разделам"
-            fileName: file.name,
-            discipline1: firstDiscipline || NOT_DEFINED,
-            discipline2: secondDiscipline || NOT_DEFINED,
-            total: guids.length,
-            guids,
-        }));
-    }));
-}
-
-function getGuidEntries(records) {
-    const entries = [];
-    records.forEach((record) => {
-        (record.guids || []).forEach((guid) => {
-            entries.push({ guid, discipline1: record.discipline1, discipline2: record.discipline2 });
-        });
-    });
-    return entries;
-}
+// ===== Чтение отчётов выбранной папки =====
 
 function filterGuidEntriesByDiscipline(entries) {
     if (disciplineFilter.size === KNOWN_DISCIPLINES.length) return entries;
@@ -270,33 +246,53 @@ function parseReportFileName(fileName) {
     return { folderNamePart, dateKey: `${day}-${month}-${year}`, date };
 }
 
-function isArchiveReportFile(file, folderName) {
+/**
+ * Отчёт подпапки: путь "<выбранная папка>/<подпапка>/!АРХИВ/<файл>.json" —
+ * ровно 4 сегмента, имя файла "<имя этой подпапки>_дд-мм-гггг.json"
+ */
+function isArchiveReportFile(file) {
     if (!file.name.toLowerCase().endsWith('.json')) return false;
     const segments = (file.webkitRelativePath || '').split('/');
-    if (segments.length !== 3) return false;
-    if (segments[1] !== ARCHIVE_FOLDER_NAME) return false;
+    if (segments.length !== 4) return false;
+    if (segments[2] !== ARCHIVE_FOLDER_NAME) return false;
     const parsed = parseReportFileName(file.name);
-    return Boolean(parsed) && parsed.folderNamePart === folderName;
+    return Boolean(parsed) && parsed.folderNamePart === segments[1];
 }
 
-function buildArchivePoints(allFiles, folderName) {
-    const reportFiles = allFiles.filter((file) => isArchiveReportFile(file, folderName));
+/**
+ * Имя подпапки, к которой относится отчёт (второй сегмент пути)
+ */
+function getReportFolderName(file) {
+    return file.webkitRelativePath.split('/')[1];
+}
+
+/**
+ * reportFiles — уже отобранные отчёты одной подпапки (см. isArchiveReportFile).
+ * У каждого GUID и файла запоминается имя подпапки — для сравнения и
+ * подписей при выборе нескольких папок.
+ */
+function buildArchivePoints(reportFiles, folderName) {
     return Promise.all(
         reportFiles.map((file) =>
             file.text().then((text) => {
                 let data;
                 try { data = JSON.parse(text); } catch (e) { console.error(`Не удалось разобрать отчёт ${file.name}:`, e); return null; }
+                if (!data || typeof data !== 'object') return null;
                 const parsed = parseReportFileName(file.name);
                 const guidEntries = Array.isArray(data.guids)
-                    ? data.guids.filter((entry) => entry && typeof entry.guid === 'string')
+                    ? data.guids
+                        .filter((entry) => entry && typeof entry.guid === 'string')
+                        .map((entry) => ({ ...entry, folderName }))
                     : [];
                 // "files" есть только в отчётах, выгруженных после появления
                 // списка файлов в "Таблице по разделам"; в старых отчётах его
                 // нет — тогда для архивной даты список файлов просто недоступен
-                const files = Array.isArray(data.files)
+                const hasFiles = Array.isArray(data.files);
+                const files = hasFiles
                     ? data.files
                         .filter((entry) => entry && typeof entry.fileName === 'string')
                         .map((entry) => ({
+                            folderName,
                             fileName: entry.fileName,
                             discipline1: entry.discipline1 || NOT_DEFINED,
                             discipline2: entry.discipline2 || NOT_DEFINED,
@@ -311,10 +307,56 @@ function buildArchivePoints(allFiles, folderName) {
                     pairs: data.pairs && typeof data.pairs === 'object' ? data.pairs : {},
                     guidEntries,
                     files,
+                    hasFiles,
                 };
             })
         )
     ).then((list) => list.filter(Boolean).sort((a, b) => a.date - b.date));
+}
+
+// ===== Сумма по выбранным папкам =====
+
+function addValues(target, source) {
+    Object.entries(source || {}).forEach(([key, value]) => {
+        target[key] = (target[key] || 0) + (Number(value) || 0);
+    });
+}
+
+/**
+ * Точки той же формы, что и отчёт одной папки: даты — объединение дат всех
+ * выбранных папок; на каждую дату total, sections и pairs СУММИРУЮТСЯ, у
+ * папки без отчёта на эту дату вклад 0 (прошлые значения не переносятся).
+ * foldersWithoutFiles — папки, чей отчёт на эту дату без списка "files"
+ * (по их файлам изменение относительно этой даты не показывается).
+ */
+function buildAggregatedPoints(selectedFolders) {
+    const pointsByKey = new Map();
+    selectedFolders.forEach((folder) => {
+        folder.archivePoints.forEach((point) => {
+            let aggregated = pointsByKey.get(point.key);
+            if (!aggregated) {
+                aggregated = {
+                    key: point.key,
+                    date: point.date,
+                    total: 0,
+                    sections: {},
+                    pairs: {},
+                    guidEntries: [],
+                    files: [],
+                    foldersWithoutFiles: new Set(),
+                };
+                pointsByKey.set(point.key, aggregated);
+            }
+            aggregated.total += point.total;
+            addValues(aggregated.sections, point.sections);
+            addValues(aggregated.pairs, point.pairs);
+            // concat, а не push(...): GUID в отчёте могут быть десятки тысяч
+            aggregated.guidEntries = aggregated.guidEntries.concat(point.guidEntries);
+            aggregated.files = aggregated.files.concat(point.files);
+            if (!point.hasFiles) aggregated.foldersWithoutFiles.add(folder.name);
+        });
+    });
+    return [...pointsByKey.values()].sort((a, b) => a.date - b.date);
 }
 
 // ===== Сводные данные по разделам =====
@@ -378,27 +420,6 @@ function getPairKey(first, second) {
     return [first, second].sort().join('|');
 }
 
-function buildCollisionMatrix(records, disciplines) {
-    const matrix = {};
-    disciplines.forEach((row) => {
-        matrix[row] = {};
-        disciplines.forEach((col) => {
-            const straight = records
-                .filter(r => r.discipline1 === row && r.discipline2 === col)
-                .reduce((s, r) => s + r.total, 0);
-            if (row === col) {
-                matrix[row][col] = straight;
-                return;
-            }
-            const reverse = records
-                .filter(r => r.discipline1 === col && r.discipline2 === row)
-                .reduce((s, r) => s + r.total, 0);
-            matrix[row][col] = straight + reverse;
-        });
-    });
-    return matrix;
-}
-
 // ===== Новая цветовая шкала для ячеек =====
 
 function getHeatColor(value) {
@@ -432,7 +453,8 @@ function renderHeatCell(value, extraClass = '', referenceValue = undefined) {
     else if (value <= 100) textColor = '#bb7600';
     else textColor = '#af0000';
 
-    return `<td class="${cellClass}" style="background-color: ${color}; color: ${textColor}; font-weight: 500;">${value}${deltaIndicator}</td>`;
+    // жирность числа — в style.css (--font-table-number-weight), не здесь
+    return `<td class="${cellClass}" style="background-color: ${color}; color: ${textColor};">${value}${deltaIndicator}</td>`;
 }
 
 // ===== Матрица конфликтов =====
@@ -520,14 +542,24 @@ function escapeHtml(text) {
 function getDisciplineFiles(files, discipline) {
     return files
         .filter((file) => file.discipline1 === discipline || file.discipline2 === discipline)
-        .sort((a, b) => b.total - a.total || a.fileName.localeCompare(b.fileName, undefined, { numeric: true }));
+        .sort((a, b) => b.total - a.total
+            || a.folderName.localeCompare(b.folderName, undefined, { numeric: true })
+            || a.fileName.localeCompare(b.fileName, undefined, { numeric: true }));
+}
+
+/**
+ * Файл сравнивается с начальной датой по паре "папка + имя файла": в разных
+ * папках могут быть файлы с одинаковыми именами
+ */
+function getFileKey(file) {
+    return `${file.folderName}|${file.fileName}`;
 }
 
 /**
  * files — список файлов конечной даты (для архивной даты есть только в
  * отчётах, выгруженных с полем "files"); если списка нет — строки не
- * раскрываются. referenceData.files (если есть) — для индикатора изменения
- * по каждому файлу.
+ * раскрываются. referenceData.files — для индикатора изменения по каждому
+ * файлу (кроме папок, чей отчёт на начальную дату без списка файлов).
  */
 function renderSectionTable(records, referenceData, files = []) {
     sectionTableBody.innerHTML = '';
@@ -537,9 +569,12 @@ function renderSectionTable(records, referenceData, files = []) {
     const rows = disciplines.map(d => ({ discipline: d, total: getDisciplineTotal(records, d) }));
     rows.sort((a, b) => b.total - a.total);
 
-    const refFiles = referenceData && Array.isArray(referenceData.files) && referenceData.files.length
-        ? new Map(referenceData.files.map((file) => [file.fileName, file.total]))
+    const refFiles = referenceData
+        ? new Map((referenceData.files || []).map((file) => [getFileKey(file), file.total]))
         : null;
+    const refFoldersWithoutFiles = (referenceData && referenceData.foldersWithoutFiles) || new Set();
+    // при нескольких выбранных папках у имени файла есть префикс папки
+    const showFolderPrefix = selectedFolderNames.size > 1;
 
     let html = '<div class="section-table-wrapper"><table class="section-table">'
         + '<colgroup><col class="section-table__col-name"><col class="section-table__col-total"></colgroup>'
@@ -554,13 +589,15 @@ function renderSectionTable(records, referenceData, files = []) {
             + (isExpanded ? ' section-table__row--expanded' : '');
         const rowTitle = isExpandable ? '' : ' title="Нет данных по файлам для выбранной даты"';
         html += `<tr class="${rowClass}" data-discipline="${escapeHtml(row.discipline)}"${rowTitle}>`;
-        html += `<td class="section-table__discipline"><span class="section-table__toggle">▸</span>${escapeHtml(row.discipline)}</td>`;
+        html += `<td class="section-table__discipline">${escapeHtml(row.discipline)}<span class="section-table__toggle">▸</span></td>`;
         html += renderHeatCell(row.total, '', refValue);
         html += '</tr>';
 
         disciplineFiles.forEach((file) => {
-            const refFileValue = refFiles ? (refFiles.get(file.fileName) || 0) : undefined;
-            const name = escapeHtml(file.fileName);
+            const refFileValue = refFiles && !refFoldersWithoutFiles.has(file.folderName)
+                ? (refFiles.get(getFileKey(file)) || 0)
+                : undefined;
+            const name = escapeHtml(showFolderPrefix ? `${file.folderName} / ${file.fileName}` : file.fileName);
             html += `<tr class="section-table__file-row" data-parent="${escapeHtml(row.discipline)}"${isExpanded ? '' : ' hidden'}>`;
             html += `<td class="section-table__file-name" title="${name}">${name}</td>`;
             html += `<td class="section-table__file-count">${file.total}${renderDeltaIndicator(file.total, refFileValue)}</td>`;
@@ -598,7 +635,7 @@ function renderTotalChart(points, startIdx, endIdx) {
     const chartPoints = points.map((p) => ({ label: p.key, value: p.total }));
 
     const width = 1300, height = 240;
-    const padding = { top: 16, right: 20, bottom: 45, left: 40 };
+    const padding = CHART_PADDING;
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
     const chartBottom = padding.top + chartHeight;
@@ -670,7 +707,9 @@ function renderTotalChart(points, startIdx, endIdx) {
     labelIndices.forEach((idx) => {
         const coord = coords[idx];
         if (!coord) return;
-        axisLabels += `<text x="${coord.x}" y="${chartBottom + 16}" class="chart-axis-label" text-anchor="middle" fill="#333">${coord.label}</text>`;
+        // dominant-baseline="hanging": даты висят под осью, не наезжая на неё
+        // при любом масштабе шрифта
+        axisLabels += `<text x="${coord.x}" y="${chartBottom + 6}" dominant-baseline="hanging" class="chart-axis-label" text-anchor="${getDateLabelAnchor(idx, coords.length)}" fill="#333">${coord.label}</text>`;
     });
 
     totalChartBody.innerHTML = `
@@ -683,6 +722,25 @@ function renderTotalChart(points, startIdx, endIdx) {
             ${axisLabels}
         </svg>
     `;
+    fitChartTextToScreen(totalChartBody.querySelector('svg'));
+}
+
+/**
+ * SVG графиков растягивается под ширину плитки (viewBox), и вместе с ним
+ * масштабируется текст подписей. Чтобы подписи осей на экране были ровно
+ * --font-number-size (как числа в матрице), в CSS их размер делится на
+ * масштаб SVG — его и выставляем в --chart-scale.
+ */
+function fitChartTextToScreen(svg) {
+    if (!svg) return;
+    const matrix = svg.getScreenCTM();
+    const scale = matrix && matrix.a > 0 ? matrix.a : 1;
+    svg.style.setProperty('--chart-scale', String(scale));
+}
+
+function fitAllChartsTextToScreen() {
+    fitChartTextToScreen(totalChartBody.querySelector('svg'));
+    fitChartTextToScreen(disciplineChartBody.querySelector('svg'));
 }
 
 // ===== График динамики по разделам (с сеткой и подписями) =====
@@ -708,7 +766,7 @@ function renderDisciplineChart(points, startIdx, endIdx) {
 
     // Размеры и отступы (увеличили left и bottom для подписей)
     const width = 900, height = 200;
-    const padding = { top: 16, right: 20, bottom: 45, left: 40 };
+    const padding = CHART_PADDING;
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
     const chartBottom = padding.top + chartHeight;
@@ -746,18 +804,23 @@ function renderDisciplineChart(points, startIdx, endIdx) {
     let axisLabelsHTML = '';
     labelIndices.forEach(idx => {
         const x = padding.left + stepX * idx;
-        axisLabelsHTML += `<text x="${x}" y="${chartBottom + 16}" class="chart-axis-label" text-anchor="middle" fill="#333">${axisLabels[idx]}</text>`;
+        axisLabelsHTML += `<text x="${x}" y="${chartBottom + 6}" dominant-baseline="hanging" class="chart-axis-label" text-anchor="${getDateLabelAnchor(idx, axisLabels.length)}" fill="#333">${axisLabels[idx]}</text>`;
     });
 
-    // Линии и точки для каждой дисциплины
+    // Линии и точки для каждой дисциплины. data-order — исходный порядок
+    // отрисовки (все линии, затем все точки): applyDisciplineHighlight
+    // переставляет элементы, а при снятии выделения возвращает этот порядок.
+    // data-r/data-stroke-width — размеры точки, *-dimmed — для неактивной линии.
     let lines = '', markers = '';
+    let lineOrder = 0;
+    let markerOrder = series.length; // точки — после всех линий
     series.forEach(line => {
         const coords = line.values.map((val, i) => ({
             x: padding.left + stepX * i,
             y: chartBottom - (val / maxValue) * chartHeight,
         }));
         const linePoints = coords.map(c => `${c.x},${c.y}`).join(' ');
-        lines += `<polyline points="${linePoints}" class="chart-line" data-discipline="${line.discipline}" data-stroke="${line.color}" style="stroke: ${line.color}" />`;
+        lines += `<polyline points="${linePoints}" class="chart-line" data-discipline="${line.discipline}" data-stroke="${line.color}" data-order="${lineOrder++}" style="stroke: ${line.color}" />`;
         coords.forEach((coord, i) => {
             const isStart = i === startIdx;
             const isEnd = i === endIdx;
@@ -765,8 +828,9 @@ function renderDisciplineChart(points, startIdx, endIdx) {
             const pointStroke = line.color;
             const pointFill = isSelected ? '#ffffff' : line.color;
             const strokeWidth = isSelected ? 2.5 : 0;
+            const radius = isSelected ? 5 : 3;
             const value = line.values[i];
-            markers += `<circle cx="${coord.x}" cy="${coord.y}" r="${isSelected ? 5 : 3}" class="chart-point" style="fill: ${pointFill}; stroke: ${pointStroke}; stroke-width: ${strokeWidth};" data-discipline="${line.discipline}" data-value="${value}" data-label="${axisLabels[i]}" data-index="${i}" data-cx="${coord.x}" data-cy="${coord.y}" data-fill="${pointFill}" data-stroke="${pointStroke}" />`;
+            markers +=`<circle cx="${coord.x}" cy="${coord.y}" r="${radius}" class="chart-point" style="fill: ${pointFill}; stroke: ${pointStroke}; stroke-width: ${strokeWidth};" data-discipline="${line.discipline}" data-value="${value}" data-label="${axisLabels[i]}" data-index="${i}" data-cx="${coord.x}" data-cy="${coord.y}" data-fill="${pointFill}" data-stroke="${pointStroke}" data-order="${markerOrder++}" data-r="${radius}" data-r-dimmed="${isSelected ? 3.5 : 2}" data-stroke-width="${strokeWidth}" data-stroke-width-dimmed="${isSelected ? 1.5 : 0}" />`;
         });
     });
 
@@ -785,14 +849,20 @@ function renderDisciplineChart(points, startIdx, endIdx) {
             ${yAxisLabels}
             <line x1="${padding.left}" y1="${chartBottom}" x2="${width - padding.right}" y2="${chartBottom}" class="chart-axis-line" />
             <line x1="${padding.left}" y1="${chartBottom}" x2="${padding.left}" y2="${padding.top - 6}" class="chart-axis-line" />
-            ${lines}
-            ${markers}
+            <g class="chart-series">
+                ${lines}
+                ${markers}
+            </g>
             ${axisLabelsHTML}
         </svg>
     `;
+    fitChartTextToScreen(disciplineChartBody.querySelector('svg'));
+
+    // отмеченные в легенде разделы остаются выделенными после перерисовки
+    applyDisciplineHighlight(null);
 }
 
-// ===== Подсказка и легенда графика по разделам =====
+// ===== Подсказка графиков и легенда графика по разделам =====
 
 function getOrCreateChartTooltip() {
     if (!chartTooltip) {
@@ -837,25 +907,90 @@ function hideChartTooltip() {
     if (chartTooltip) chartTooltip.style.display = 'none';
 }
 
-function applyDisciplineHighlight(hoverDiscipline) {
-    const active = hoverDiscipline ? new Set([hoverDiscipline]) : pinnedDisciplines;
-    const noFilter = active.size === 0;
-    disciplineChartBody.querySelectorAll('[data-discipline]').forEach(el => {
-        if (!el.dataset.stroke && !el.dataset.fill) return;
-        const isActive = noFilter || active.has(el.dataset.discipline);
-        if (el.dataset.stroke) el.style.stroke = isActive ? el.dataset.stroke : 'var(--color-muted)';
-        if (el.dataset.fill) el.style.fill = isActive ? el.dataset.fill : 'var(--color-muted)';
+/**
+ * Ближайшая к курсору точка графика не дальше TOOLTIP_HIT_RADIUS экранных
+ * пикселей (или null). Координаты точек из viewBox переводятся в экранные
+ * через getScreenCTM — с учётом масштаба SVG и полей preserveAspectRatio.
+ */
+function findNearestChartPoint(svg, circles, event) {
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return null;
+    const point = svg.createSVGPoint();
+    let nearest = null;
+    let nearestDistance = TOOLTIP_HIT_RADIUS;
+    circles.forEach((circle) => {
+        point.x = Number(circle.dataset.cx);
+        point.y = Number(circle.dataset.cy);
+        const screenPoint = point.matrixTransform(matrix);
+        const distance = Math.hypot(screenPoint.x - event.clientX, screenPoint.y - event.clientY);
+        // "<=": из совпадающих точек берётся нарисованная последней (верхняя)
+        if (distance <= nearestDistance) {
+            nearest = circle;
+            nearestDistance = distance;
+        }
     });
+    return nearest;
+}
+
+/**
+ * Выделенные разделы: раздел под курсором в легенде, иначе отмеченные в
+ * легенде (только те, что сейчас есть на графике — иначе после смены фильтра
+ * или папок все линии остались бы серыми без возможности снять отметку)
+ */
+function getHighlightedDisciplines(hoverDiscipline) {
+    if (hoverDiscipline) return new Set([hoverDiscipline]);
+    const present = new Set(Array.from(disciplineChartBody.querySelectorAll('.chart-legend__checkbox'))
+        .map((checkbox) => checkbox.dataset.discipline));
+    return new Set([...pinnedDisciplines].filter((discipline) => present.has(discipline)));
+}
+
+/**
+ * Неактивные линии и их точки — серые, тоньше и рисуются ПОД активными
+ * (элементы переставляются внутри .chart-series); без выделения — исходные
+ * цвета, толщина и порядок (data-order)
+ */
+function applyDisciplineHighlight(hoverDiscipline) {
+    const seriesGroup = disciplineChartBody.querySelector('.chart-series');
+    if (!seriesGroup) return;
+    const active = getHighlightedDisciplines(hoverDiscipline);
+    const noFilter = active.size === 0;
+    const elements = Array.from(seriesGroup.children);
+    const isElementActive = (el) => noFilter || active.has(el.dataset.discipline);
+
+    elements.forEach(el => {
+        const isActive = isElementActive(el);
+        el.style.stroke = isActive ? el.dataset.stroke : 'var(--color-muted)';
+        if (el.classList.contains('chart-point')) {
+            el.style.fill = isActive ? el.dataset.fill : 'var(--color-muted)';
+            el.style.strokeWidth = isActive ? el.dataset.strokeWidth : el.dataset.strokeWidthDimmed;
+            el.setAttribute('r', isActive ? el.dataset.r : el.dataset.rDimmed);
+        } else {
+            el.classList.toggle('chart-line--dimmed', !isActive);
+        }
+    });
+
+    // слои снизу вверх: неактивные линии, их точки, активные линии, их точки
+    const getLayer = (el) => (isElementActive(el) ? 2 : 0) + (el.classList.contains('chart-point') ? 1 : 0);
+    elements
+        .sort((a, b) => getLayer(a) - getLayer(b) || Number(a.dataset.order) - Number(b.dataset.order))
+        .forEach((el) => seriesGroup.appendChild(el));
 }
 
 function setupDisciplineChartInteractions() {
     disciplineChartBody.addEventListener('mousemove', (event) => {
-        const target = event.target.closest('[data-discipline]');
-        if (!target) { hideChartTooltip(); return; }
-        const discipline = target.dataset.discipline;
-        const value = target.dataset.value;
-        const label = target.dataset.label;
-        showChartTooltip(event, label, value, discipline);  // три параметра
+        const svg = disciplineChartBody.querySelector('svg');
+        if (!svg || event.target.closest('.chart-legend')) { hideChartTooltip(); return; }
+        // приоритет — у точек выделенных в легенде линий; если рядом таких
+        // нет — ближайшая точка любой линии
+        const circles = Array.from(svg.querySelectorAll('.chart-point'));
+        const highlighted = getHighlightedDisciplines(null);
+        let circle = null;
+        if (highlighted.size) {
+            circle = findNearestChartPoint(svg, circles.filter((c) => highlighted.has(c.dataset.discipline)), event);
+        }
+        if (!circle) circle = findNearestChartPoint(svg, circles, event);
+        if (!circle) { hideChartTooltip(); return; }
+        showChartTooltip(event, circle.dataset.label, circle.dataset.value, circle.dataset.discipline);
     });
     disciplineChartBody.addEventListener('mouseleave', hideChartTooltip);
     disciplineChartBody.addEventListener('mouseover', (event) => {
@@ -877,93 +1012,47 @@ function setupDisciplineChartInteractions() {
 
 // ===== Взаимодействие с графиком динамики (кастомная подсказка) =====
 
+/**
+ * Подсказка и линия-указатель появляются, когда курсор не дальше
+ * TOOLTIP_HIT_RADIUS пикселей от точки (не только при точном наведении)
+ */
 function setupTotalChartInteractions() {
-    const container = totalChartBody;
-    const tooltip = document.createElement('div');
-    tooltip.className = 'custom-tooltip';
-    tooltip.style.position = 'fixed';
-    tooltip.style.zIndex = '1000';
-    tooltip.style.padding = '8px 12px';
-    tooltip.style.background = '#ffffff';
-    tooltip.style.border = '2px solid #000000';
-    tooltip.style.borderRadius = '6px';
-    tooltip.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-    tooltip.style.fontFamily = '"Barlow Condensed", "Segoe UI", Arial, sans-serif';
-    tooltip.style.fontSize = '14px';
-    tooltip.style.fontWeight = '600';
-    tooltip.style.color = '#000000';
-    tooltip.style.pointerEvents = 'none';
-    tooltip.style.display = 'none';
-    tooltip.style.whiteSpace = 'nowrap';
-    tooltip.style.lineHeight = '1.4';
-    document.body.appendChild(tooltip);
+    const hideHover = () => {
+        hideChartTooltip();
+        const hoverLine = totalChartBody.querySelector('.chart-hover-line');
+        if (hoverLine) hoverLine.style.display = 'none';
+    };
 
-    container.addEventListener('mouseover', (event) => {
-        const circle = event.target.closest('.chart-point');
-        if (!circle) return;
-        const label = circle.dataset.label || '';
-        const value = circle.dataset.value || '';
-
-        tooltip.innerHTML = `<div class="date">${label}</div><div class="value">${value}</div>`;
-        tooltip.style.display = 'block';
+    totalChartBody.addEventListener('mousemove', (event) => {
+        const svg = totalChartBody.querySelector('svg');
+        const circle = svg ? findNearestChartPoint(svg, svg.querySelectorAll('.chart-point'), event) : null;
+        if (!circle) { hideHover(); return; }
 
         // Позиционируем относительно мыши, а не точки
-        let left = event.clientX - tooltip.offsetWidth - 4;
-        let top = event.clientY + 4;
+        showChartTooltip(event, circle.dataset.label || '', circle.dataset.value || '');
 
-        // Корректировка по горизонтали
-        if (left < 0) {
-            left = event.clientX + 4;
-        }
-        if (left + tooltip.offsetWidth > window.innerWidth) {
-            left = event.clientX - tooltip.offsetWidth - 4;
-            if (left < 0) left = 4;
-        }
-        // Корректировка по вертикали
-        if (top + tooltip.offsetHeight > window.innerHeight) {
-            top = event.clientY - tooltip.offsetHeight - 4;
-        }
-        if (top < 0) top = 4;
-
-        tooltip.style.left = left + 'px';
-        tooltip.style.top = top + 'px';
-
-        // Линия-указатель (оставляем как есть)
-        const svg = container.querySelector('svg');
-        if (svg) {
-            const hoverLine = svg.querySelector('.chart-hover-line');
-            if (hoverLine) {
-                const cx = parseFloat(circle.getAttribute('cx'));
-                const cy = parseFloat(circle.getAttribute('cy'));
-                const padding = { top: 22, bottom: 45 };
-                const viewBox = svg.viewBox.baseVal;
-                hoverLine.setAttribute('x1', cx);
-                hoverLine.setAttribute('x2', cx);
-                hoverLine.setAttribute('y1', padding.top);
-                hoverLine.setAttribute('y2', viewBox.height - padding.bottom);
-                hoverLine.style.display = 'block';
-            }
+        // Линия-указатель через выбранную точку
+        const hoverLine = svg.querySelector('.chart-hover-line');
+        if (hoverLine) {
+            const cx = parseFloat(circle.getAttribute('cx'));
+            const viewBox = svg.viewBox.baseVal;
+            hoverLine.setAttribute('x1', cx);
+            hoverLine.setAttribute('x2', cx);
+            hoverLine.setAttribute('y1', CHART_PADDING.top);
+            hoverLine.setAttribute('y2', viewBox.height - CHART_PADDING.bottom);
+            hoverLine.style.display = 'block';
         }
     });
 
-    container.addEventListener('mouseout', (event) => {
-        const related = event.relatedTarget;
-        if (related && related.closest && related.closest('.chart-point')) return;
-        const svg = container.querySelector('svg');
-        if (svg) {
-            const hoverLine = svg.querySelector('.chart-hover-line');
-            if (hoverLine) hoverLine.style.display = 'none';
-        }
-        tooltip.style.display = 'none';
-    });
+    totalChartBody.addEventListener('mouseleave', hideHover);
 }
 
 // ===== Работа с датами =====
 
 /**
- * Все данные дашборда берутся ТОЛЬКО из JSON-отчётов папки "!АРХИВ":
- * index — номер отчёта в archivePoints (отсортированы по дате из имени файла).
- * Точки "Сейчас" нет — XML-файлы сайт не читает (кроме выгрузки отчёта).
+ * Все данные дашборда берутся ТОЛЬКО из JSON-отчётов папок "!АРХИВ":
+ * index — номер даты в archivePoints (сумма выбранных подпапок, по дате из
+ * имени файла). Точки "Сейчас" нет — XML-файлы сайт не читает.
  */
 function getDataForDate(index) {
     const point = archivePoints[index];
@@ -976,6 +1065,7 @@ function getDataForDate(index) {
         pairs: filtered.pairs,
         guidEntries: filtered.guidEntries || [],
         files: filterRecordsByDiscipline(point.files || []),
+        foldersWithoutFiles: point.foldersWithoutFiles || new Set(),
     };
 }
 
@@ -1082,28 +1172,20 @@ function setDefaultDates() {
 // ===== Главная функция обновления дашборда =====
 
 function updateDashboard() {
-    if (activeFolderIndex === -1) {
-        totalCollisionsValue.textContent = '—';
-        changePercentValue.textContent = '—';
-        periodDeltaValue.textContent = '—';
-        renderComparisonStats(null, null);
-        collisionMatrixBody.innerHTML = '';
-        sectionTableBody.innerHTML = '';
-        totalChartBody.innerHTML = '';
-        disciplineChartBody.innerHTML = '';
-        updateZoomButtonVisibility();
-        return;
-    }
-
+    // без данных (ничего не загружено или не выбрана ни одна папка)
+    // getDataForDate вернёт null — дашборд пустой, с прочерками
     const startData = getDataForDate(startDateIndex);
     const endData = getDataForDate(endDateIndex);
-    // "всего" и процент — всегда по ПОСЛЕДНЕМУ отчёту в "!АРХИВ" (последний
-    // по дате в имени файла), независимо от выбранной конечной даты
+    // "всего" и процент — всегда по ПОСЛЕДНЕЙ дате (последний отчёт по дате
+    // в имени файла), независимо от выбранной конечной даты
     const latestData = getDataForDate(archivePoints.length - 1);
     if (!startData || !endData || !latestData) {
+        hideChartTooltip();
         totalCollisionsValue.textContent = '—';
         changePercentValue.textContent = '—';
+        setColor(changePercentValue, 0);
         periodDeltaValue.textContent = '—';
+        setColor(periodDeltaValue, 0);
         renderComparisonStats(null, null);
         collisionMatrixBody.innerHTML = '';
         sectionTableBody.innerHTML = '';
@@ -1163,69 +1245,130 @@ function updateDashboard() {
     updateZoomButtonVisibility();
 }
 
-// ===== Управление списком папок =====
+// ===== Загрузка выбранной папки =====
 
 /**
- * Папка добавляется только по JSON-отчётам из "!АРХИВ" — XML-файлы здесь не
- * читаются вовсе (их читает только exportReport в момент выгрузки отчёта).
+ * allFiles — файлы-кандидаты с путём в webkitRelativePath (от выбранной
+ * папки); отчёты отбираются по isArchiveReportFile и группируются по
+ * подпапкам. Подпапки без отчётов в список не попадают. Повторная загрузка
+ * полностью заменяет прежние данные.
  */
-function addFolder(name, allFiles, dirHandle = null) {
-    return buildArchivePoints(allFiles, name).then((points) => {
-        // без отчётов показывать нечего; в административной версии папку всё
-        // равно добавляем — чтобы можно было выгрузить первый отчёт
-        if (!points.length && !(canWriteFiles && dirHandle)) {
-            alert(`В папке "${name}" не найдена подпапка "${ARCHIVE_FOLDER_NAME}" с отчётами вида "${name}_дд-мм-гггг.json".`);
-            return;
-        }
-        const folder = { name, archivePoints: points, dirHandle };
-        const existingIndex = folders.findIndex(f => f.name === name);
-        if (existingIndex === -1) folders.push(folder);
-        else folders[existingIndex] = folder;
-        folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-        rebuildFolderDropdown();
-        setActiveFolder(folders.findIndex(f => f.name === name));
+async function loadFolders(rootName, allFiles) {
+    const filesByFolder = new Map();
+    allFiles.filter(isArchiveReportFile).forEach((file) => {
+        const folderName = getReportFolderName(file);
+        if (!filesByFolder.has(folderName)) filesByFolder.set(folderName, []);
+        filesByFolder.get(folderName).push(file);
     });
+
+    const loadedFolders = await Promise.all([...filesByFolder].map(([name, files]) =>
+        buildArchivePoints(files, name).then((points) => ({ name, archivePoints: points }))
+    ));
+    const nonEmptyFolders = loadedFolders.filter((folder) => folder.archivePoints.length > 0);
+    if (!nonEmptyFolders.length) {
+        // прежние данные (если были) не трогаем
+        const where = rootName ? `В папке "${rootName}"` : 'В выбранной папке';
+        alert(`${where} не найдено ни одного отчёта. Ожидается: <подпапка>/${ARCHIVE_FOLDER_NAME}/<имя подпапки>_дд-мм-гггг.json`);
+        return;
+    }
+    nonEmptyFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+    resetDashboard();
+    folders = nonEmptyFolders;
+
+    // список разделов фильтра — один раз, по ВСЕМ загруженным папкам: при
+    // смене выбора папок фильтр разделов не сбрасывается
+    const allRecordsForFilters = folders
+        .flatMap((folder) => folder.archivePoints)
+        .flatMap((point) => sectionsToClashRecords(point.sections));
+    rebuildDisciplineFilters(getPresentDisciplines(allRecordsForFilters));
+
+    // по умолчанию — "Все"
+    selectedFolderNames = new Set(folders.map((folder) => folder.name));
+    rebuildFolderFilter();
+    applyFolderSelection();
 }
 
-function rebuildFolderDropdown() {
-    folderDropdown.hidden = folders.length === 0;
-    folderDropdownList.innerHTML = folders.map((f, i) => `
-        <li><button type="button" class="folder-dropdown__item${i === activeFolderIndex ? ' folder-dropdown__item--active' : ''}" data-index="${i}">${f.name}</button></li>
-    `).join('');
-    folderDropdownList.querySelectorAll('.folder-dropdown__item').forEach(item => {
-        item.addEventListener('click', () => {
-            setActiveFolder(Number(item.dataset.index));
-            closeFolderDropdown();
-        });
-    });
-}
-
-function closeFolderDropdown() {
-    folderDropdownList.classList.remove('folder-dropdown__list--open');
-    folderDropdownToggle.setAttribute('aria-expanded', 'false');
-}
-
-function setActiveFolder(index) {
+/**
+ * Пересчёт после смены выбора папок: сумма по выбранным папкам, даты по
+ * умолчанию, сброс зума и раскрытых строк таблицы (фильтр разделов и
+ * отметки в легенде сохраняются)
+ */
+function applyFolderSelection() {
     zoomState.total.end = null;
     zoomState.discipline.end = null;
-
-    const folder = folders[index];
-    if (!folder) return;
-    activeFolderIndex = index;
-    folderDropdownLabel.textContent = folder.name;
-    rebuildFolderDropdown();
-    pinnedDisciplines = new Set();
     expandedSections = new Set();
-    archivePoints = folder.archivePoints;
 
-    const allRecordsForFilters = folder.archivePoints.flatMap(p => sectionsToClashRecords(p.sections));
-    const disciplinesForFilters = getPresentDisciplines(allRecordsForFilters);
-    rebuildDisciplineFilters(disciplinesForFilters);
+    const selectedFolders = folders.filter((folder) => selectedFolderNames.has(folder.name));
+    archivePoints = buildAggregatedPoints(selectedFolders);
 
+    updateFolderFilterState();
     setDefaultDates();
     updateDashboard();
-    updateExportButtonState();
     updatePdfButtonState();
+}
+
+// ===== Фильтр папок =====
+
+/**
+ * Число столбцов для вертикального списка с галочками: пока пунктов не
+ * больше maxRows — один столбец, дальше — до maxColumns (ширина сайдбара
+ * 300px; что не поместилось — прокручивается)
+ */
+function getListColumnCount(itemsCount, maxRows, maxColumns) {
+    return Math.min(maxColumns, Math.max(1, Math.ceil(itemsCount / maxRows)));
+}
+
+function rebuildFolderFilter() {
+    folderFilter.hidden = folders.length === 0;
+    folderFilterOptions.innerHTML = '';
+    folderFilterOptions.style.setProperty('--list-columns', getListColumnCount(folders.length, 8, 2));
+    folders.forEach((folder) => {
+        const label = document.createElement('label');
+        label.className = 'folder-filter__item';
+        label.title = folder.name;
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'folder-filter__checkbox';
+        checkbox.value = folder.name;
+        const name = document.createElement('span');
+        name.className = 'folder-filter__name';
+        name.textContent = folder.name;
+        label.appendChild(checkbox);
+        label.appendChild(name);
+        folderFilterOptions.appendChild(label);
+    });
+    updateFolderFilterState();
+}
+
+/**
+ * Галочки и надпись на кнопке — по selectedFolderNames; "Все" отмечено,
+ * только когда отмечены все папки
+ */
+function updateFolderFilterState() {
+    const selectedCount = folders.filter((folder) => selectedFolderNames.has(folder.name)).length;
+    folderFilterAll.checked = folders.length > 0 && selectedCount === folders.length;
+    folderFilterOptions.querySelectorAll('.folder-filter__checkbox').forEach((checkbox) => {
+        checkbox.checked = selectedFolderNames.has(checkbox.value);
+    });
+    folderFilterLabel.textContent = getFolderSelectionText('Все', 'Папки не выбраны', `Выбрано папок: ${selectedCount}`);
+}
+
+/**
+ * Текст о выбранных папках: allText — выбраны все, noneText — ни одной,
+ * manyText — несколько (одна папка — её имя)
+ */
+function getFolderSelectionText(allText, noneText, manyText) {
+    const selected = folders.filter((folder) => selectedFolderNames.has(folder.name));
+    if (!selected.length) return noneText;
+    if (selected.length === folders.length) return allText;
+    if (selected.length === 1) return selected[0].name;
+    return manyText;
+}
+
+function closeFolderFilter() {
+    folderFilterPanel.classList.remove('folder-dropdown__list--open');
+    folderFilterToggle.setAttribute('aria-expanded', 'false');
 }
 
 function resetDashboard() {
@@ -1233,7 +1376,7 @@ function resetDashboard() {
     zoomState.discipline.end = null;
 
     folders = [];
-    activeFolderIndex = -1;
+    selectedFolderNames = new Set();
     archivePoints = [];
     pinnedDisciplines = new Set();
     expandedSections = new Set();
@@ -1244,10 +1387,10 @@ function resetDashboard() {
     startDateIndex = -1;
     endDateIndex = -1;
 
-    folderDropdown.hidden = true;
-    folderDropdownList.innerHTML = '';
-    folderDropdownLabel.textContent = 'Папка не выбрана';
-    closeFolderDropdown();
+    folderFilter.hidden = true;
+    folderFilterOptions.innerHTML = '';
+    updateFolderFilterState();
+    closeFolderFilter();
 
     totalCollisionsValue.textContent = totalCollisions;
     changePercentValue.textContent = '—';
@@ -1265,7 +1408,6 @@ function resetDashboard() {
     endDateLabel.textContent = '-';
 
     renderComparisonStats(null, null);
-    updateExportButtonState();
     updatePdfButtonState();
     updateZoomButtonVisibility();
 }
@@ -1273,111 +1415,110 @@ function resetDashboard() {
 // ===== Выбор папки через File System Access API =====
 
 /**
- * Выбор папки через системный диалог (Chrome/Edge, https или localhost).
- * В отличие от <input webkitdirectory>, браузер НЕ перечисляет заранее все
- * файлы папки (и не показывает "будет загружено N файлов") — код сам читает
- * только нужное, см. collectFilesFromDirectoryHandle.
+ * Выбор папки через системный диалог (Chrome/Edge). В отличие от
+ * <input webkitdirectory>, браузер НЕ перечисляет заранее все файлы папки —
+ * код сам читает только нужное, см. collectReportFilesFromDirectoryHandle.
  */
 async function pickFolderWithDirectoryPicker() {
-    let dirHandle;
-    try { dirHandle = await window.showDirectoryPicker(); } catch (e) { return; }
-    const files = [];
-    await collectFilesFromDirectoryHandle(dirHandle, '', files);
-    addFolder(dirHandle.name, files, dirHandle);
-}
-
-/**
- * Читает ТОЛЬКО .json из подпапки "!АРХИВ" выбранной папки: папка ищется по
- * имени напрямую (без перебора содержимого), остальные файлы и вложенные
- * папки не затрагиваются вовсе.
- */
-async function collectFilesFromDirectoryHandle(dirHandle, prefix, results) {
-    let archiveHandle;
+    let rootHandle;
+    try { rootHandle = await window.showDirectoryPicker(); } catch (e) { return; } // диалог закрыт
     try {
-        archiveHandle = await dirHandle.getDirectoryHandle(ARCHIVE_FOLDER_NAME);
-    } catch (e) {
-        return; // папки "!АРХИВ" нет
-    }
-    const path = `${dirHandle.name}/${ARCHIVE_FOLDER_NAME}`;
-    for await (const [name, handle] of archiveHandle.entries()) {
-        if (handle.kind !== 'file' || !name.toLowerCase().endsWith('.json')) continue;
-        const file = await handle.getFile();
-        Object.defineProperty(file, 'webkitRelativePath', { value: `${path}/${name}`, configurable: true });
-        results.push(file);
+        const files = await collectReportFilesFromDirectoryHandle(rootHandle);
+        await loadFolders(rootHandle.name, files);
+    } catch (error) {
+        console.error('Не удалось прочитать папку:', error);
+        alert('Не удалось прочитать папку — подробности в консоли (F12).');
     }
 }
 
 /**
- * .xml верхнего уровня папки — читаются только в момент выгрузки отчёта
+ * Обходятся только нужные уровни: выбранная папка -> её подпапки -> "!АРХИВ"
+ * (по имени, без перебора остального содержимого подпапки) -> .json с именем
+ * "<имя подпапки>_дд-мм-гггг.json". Глубже код не заходит.
  */
-async function collectXmlFilesFromDirectoryHandle(dirHandle) {
-    const files = [];
-    for await (const [name, handle] of dirHandle.entries()) {
-        if (handle.kind === 'file' && name.toLowerCase().endsWith('.xml')) {
-            files.push(await handle.getFile());
+async function collectReportFilesFromDirectoryHandle(rootHandle) {
+    const results = [];
+    for await (const [folderName, folderHandle] of rootHandle.entries()) {
+        if (folderHandle.kind !== 'directory') continue;
+        let archiveHandle;
+        try {
+            archiveHandle = await folderHandle.getDirectoryHandle(ARCHIVE_FOLDER_NAME);
+        } catch (e) {
+            continue; // в подпапке нет "!АРХИВ"
+        }
+        for await (const [fileName, fileHandle] of archiveHandle.entries()) {
+            if (fileHandle.kind !== 'file') continue;
+            const parsed = parseReportFileName(fileName);
+            if (!parsed || parsed.folderNamePart !== folderName) continue;
+            const file = await fileHandle.getFile();
+            setRelativePath(file, [rootHandle.name, folderName, ARCHIVE_FOLDER_NAME, fileName]);
+            results.push(file);
         }
     }
-    return files;
+    return results;
+}
+
+/**
+ * Путь от выбранной папки — как у файлов из <input webkitdirectory>, чтобы
+ * все способы выбора проходили через один isArchiveReportFile
+ */
+function setRelativePath(file, segments) {
+    Object.defineProperty(file, 'webkitRelativePath', { value: segments.join('/'), configurable: true });
 }
 
 // ===== Drag & Drop =====
 
-async function handleDroppedItems(dataTransferItems) {
-    const pending = Array.from(dataTransferItems)
-        .filter(item => item.kind === 'file')
-        .map(item => ({
-            handlePromise: (canWriteFiles && typeof item.getAsFileSystemHandle === 'function') ? item.getAsFileSystemHandle() : null,
-            entry: item.webkitGetAsEntry && item.webkitGetAsEntry(),
-        }));
-
-    for (const { handlePromise, entry } of pending) {
-        if (handlePromise) {
-            const handle = await handlePromise;
-            if (handle && handle.kind === 'directory') {
-                await addDroppedDirectoryHandle(handle);
-                continue;
-            }
-        }
-        if (!entry || !entry.isDirectory) continue;
-        const files = [];
-        await collectFilesFromEntry(entry, '', files);
-        await addFolder(entry.name, files);
-    }
-}
-
-async function addDroppedDirectoryHandle(dirHandle) {
-    let canWrite = false;
-    try {
-        const granted = await dirHandle.queryPermission({ mode: 'readwrite' });
-        canWrite = granted === 'granted' || (await dirHandle.requestPermission({ mode: 'readwrite' })) === 'granted';
-    } catch (e) { canWrite = false; }
-    const files = [];
-    await collectFilesFromDirectoryHandle(dirHandle, '', files);
-    await addFolder(dirHandle.name, files, canWrite ? dirHandle : null);
+/**
+ * Перетаскивание папки — то же, что её выбор кнопкой. Берётся первая
+ * перетащенная папка; webkitGetAsEntry доступен только синхронно, внутри
+ * обработчика drop.
+ */
+function handleDroppedItems(dataTransferItems) {
+    const rootEntry = Array.from(dataTransferItems)
+        .filter((item) => item.kind === 'file' && typeof item.webkitGetAsEntry === 'function')
+        .map((item) => item.webkitGetAsEntry())
+        .find((entry) => entry && entry.isDirectory);
+    if (!rootEntry) return;
+    collectReportFilesFromEntry(rootEntry)
+        .then((files) => loadFolders(rootEntry.name, files))
+        .catch((error) => {
+            console.error('Не удалось прочитать папку:', error);
+            alert('Не удалось прочитать папку — подробности в консоли (F12).');
+        });
 }
 
 /**
- * То же ограничение, что и в collectFilesFromDirectoryHandle: depth 0 — сама
- * перетащенная папка, depth 1 — её содержимое (заходим только в "!АРХИВ",
- * файлы не трогаем), depth 2 — содержимое "!АРХИВ" (только .json)
+ * Те же уровни, что и в collectReportFilesFromDirectoryHandle: перетащенная
+ * папка -> её подпапки -> "!АРХИВ" -> .json отчёты этой подпапки
  */
-async function collectFilesFromEntry(entry, prefix, results, depth = 0) {
-    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const lowerName = entry.name.toLowerCase();
-    if (entry.isFile) {
-        const isWanted = depth === 2 && lowerName.endsWith('.json');
-        if (!isWanted) return;
-        const file = await readEntryAsFile(entry);
-        Object.defineProperty(file, 'webkitRelativePath', { value: path, configurable: true });
-        results.push(file);
-        return;
+async function collectReportFilesFromEntry(rootEntry) {
+    const results = [];
+    const folderEntries = (await readAllDirectoryEntries(rootEntry)).filter((entry) => entry.isDirectory);
+    for (const folderEntry of folderEntries) {
+        const archiveEntry = await getChildDirectoryEntry(folderEntry, ARCHIVE_FOLDER_NAME);
+        if (!archiveEntry) continue;
+        const fileEntries = (await readAllDirectoryEntries(archiveEntry)).filter((entry) => entry.isFile);
+        for (const fileEntry of fileEntries) {
+            const parsed = parseReportFileName(fileEntry.name);
+            if (!parsed || parsed.folderNamePart !== folderEntry.name) continue;
+            const file = await readEntryAsFile(fileEntry);
+            setRelativePath(file, [rootEntry.name, folderEntry.name, ARCHIVE_FOLDER_NAME, fileEntry.name]);
+            results.push(file);
+        }
     }
-    if (entry.isDirectory) {
-        const isWanted = depth === 0 || (depth === 1 && entry.name === ARCHIVE_FOLDER_NAME);
-        if (!isWanted) return;
-        const children = await readAllDirectoryEntries(entry);
-        for (const child of children) await collectFilesFromEntry(child, path, results, depth + 1);
+    return results;
+}
+
+/**
+ * Вложенная папка по имени (или null). Если getDirectory недоступен —
+ * ищем среди непосредственного содержимого папки.
+ */
+function getChildDirectoryEntry(dirEntry, name) {
+    if (typeof dirEntry.getDirectory !== 'function') {
+        return readAllDirectoryEntries(dirEntry)
+            .then((entries) => entries.find((entry) => entry.isDirectory && entry.name === name) || null);
     }
+    return new Promise((resolve) => dirEntry.getDirectory(name, {}, resolve, () => resolve(null)));
 }
 
 async function readAllDirectoryEntries(dirEntry) {
@@ -1398,108 +1539,25 @@ function readEntryAsFile(entry) {
     return new Promise((resolve, reject) => entry.file(resolve, reject));
 }
 
-// ===== Выгрузка отчёта =====
-
-function updateExportButtonState() {
-    if (!btnExportReport || !canWriteFiles) return;
-    const folder = folders[activeFolderIndex];
-    const canExport = Boolean(folder && folder.dirHandle);
-    btnExportReport.disabled = !canExport;
-    btnExportReport.title = canExport ? '' : 'Выберите папку с XML-отчётами';
-}
-
-async function exportReport() {
-    const folder = folders[activeFolderIndex];
-    if (!folder || !folder.dirHandle) {
-        alert('Нет доступа на запись для этой папки — выберите её заново кнопкой "Выбрать папку с XML-отчётами".');
-        return;
-    }
-    // XML-файлы читаются только здесь, в момент выгрузки: дашборд строится
-    // исключительно по JSON-отчётам из "!АРХИВ"
-    btnExportReport.disabled = true;
-    btnExportReport.textContent = 'Чтение XML...';
-    let records;
-    try {
-        const xmlFiles = await collectXmlFilesFromDirectoryHandle(folder.dirHandle);
-        if (!xmlFiles.length) {
-            alert('В выбранной папке не найдено ни одного .xml-файла верхнего уровня (только в самой папке, не во вложенных).');
-            btnExportReport.textContent = 'Выгрузить отчёт';
-            updateExportButtonState();
-            return;
-        }
-        records = await buildClashRecords(xmlFiles);
-    } catch (error) {
-        console.error('Не удалось прочитать XML-файлы:', error);
-        alert('Не удалось прочитать XML-файлы — подробности в консоли (F12).');
-        btnExportReport.textContent = 'Выгрузить отчёт';
-        updateExportButtonState();
-        return;
-    }
-    const total = records.reduce((sum, record) => sum + record.total, 0);
-
-    const disciplines = getPresentDisciplines(records);
-    const sections = {};
-    disciplines.forEach(d => { sections[d] = getDisciplineTotal(records, d); });
-    const matrix = buildCollisionMatrix(records, disciplines);
-    const pairs = {};
-    disciplines.forEach((row, ri) => {
-        disciplines.forEach((col, ci) => {
-            if (ci < ri) return;
-            pairs[getPairKey(row, col)] = matrix[row][col];
-        });
-    });
-    const guids = getGuidEntries(records);
-    const today = new Date();
-    const day = String(today.getDate()).padStart(2, '0');
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const year = today.getFullYear();
-    const fileName = `${folder.name}_${day}-${month}-${year}.json`;
-    // список файлов — для раскрывающихся строк "Таблицы по разделам" на архивных датах
-    const files = records.map((record) => ({
-        fileName: record.fileName,
-        discipline1: record.discipline1,
-        discipline2: record.discipline2,
-        total: record.total,
-    }));
-    const reportData = { total, sections, pairs, guids, files };
-
-    btnExportReport.disabled = true;
-    btnExportReport.textContent = 'Сохранение...';
-    try {
-        const archiveDirHandle = await folder.dirHandle.getDirectoryHandle(ARCHIVE_FOLDER_NAME, { create: true });
-        const fileHandle = await archiveDirHandle.getFileHandle(fileName, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(JSON.stringify(reportData, null, 2));
-        await writable.close();
-        const refreshedFiles = [];
-        await collectFilesFromDirectoryHandle(folder.dirHandle, '', refreshedFiles);
-        await addFolder(folder.name, refreshedFiles, folder.dirHandle);
-    } catch (error) {
-        console.error('Не удалось сохранить отчёт:', error);
-        alert('Не удалось сохранить отчёт — подробности в консоли (F12).');
-    } finally {
-        btnExportReport.textContent = 'Выгрузить отчёт';
-        updateExportButtonState();
-    }
-}
-
 // ===== Выгрузка в PDF =====
 
 /**
- * Кнопка активна, только когда выбрана папка
+ * Кнопка активна, только когда есть данные для дашборда (папка загружена и
+ * в фильтре папок отмечена хотя бы одна)
  */
 function updatePdfButtonState() {
     if (!btnExportPdf) return;
-    const hasFolder = Boolean(folders[activeFolderIndex]);
-    btnExportPdf.disabled = !hasFolder;
-    btnExportPdf.title = hasFolder ? '' : 'Выберите папку с XML-отчётами';
+    const hasData = archivePoints.length > 0;
+    btnExportPdf.disabled = !hasData;
+    if (hasData) btnExportPdf.title = '';
+    else btnExportPdf.title = folders.length ? 'Не выбрана ни одна папка' : 'Выберите папку с отчётами';
 }
 
 /**
  * Шапка PDF — собирается из текущих значений сайдбара (вставляется только в
  * копию страницы, которую рисует html2canvas, на сам сайт не влияет)
  */
-function buildPdfHeader(targetDocument, folder) {
+function buildPdfHeader(targetDocument) {
     const today = new Date();
     const dateText = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
     const checkedDisciplines = Array.from(disciplineFilterList.querySelectorAll('.discipline-filter__checkbox'))
@@ -1507,11 +1565,14 @@ function buildPdfHeader(targetDocument, folder) {
         .map((checkbox) => checkbox.value);
     const allDisciplinesCount = disciplineFilterList.querySelectorAll('.discipline-filter__checkbox').length;
     const filterText = checkedDisciplines.length === allDisciplinesCount ? 'все разделы' : (checkedDisciplines.join(', ') || '—');
+    const selectedNames = folders.filter((folder) => selectedFolderNames.has(folder.name)).map((folder) => folder.name);
+    const foldersText = getFolderSelectionText('все папки', '—', selectedNames.join(', '));
 
     const header = targetDocument.createElement('div');
     header.className = 'pdf-header';
     header.innerHTML = `
-        <div class="pdf-header__title">Отчёт по коллизиям — ${escapeHtml(folder.name)}</div>
+        <div class="pdf-header__title">Отчёт по коллизиям — ${escapeHtml(projectName)}</div>
+        <div class="pdf-header__line">Папки: ${escapeHtml(foldersText)}</div>
         <div class="pdf-header__line">Дата формирования: ${dateText} · Период: ${escapeHtml(startDateLabel.textContent)} — ${escapeHtml(endDateLabel.textContent)} · Фильтр: ${escapeHtml(filterText)}</div>
         <div class="pdf-header__line">
             Всего: <b>${escapeHtml(totalCollisionsValue.textContent)}</b> ·
@@ -1543,8 +1604,7 @@ function inlineSvgStyles(targetDocument) {
 }
 
 async function exportPdf() {
-    const folder = folders[activeFolderIndex];
-    if (!folder) return;
+    if (!archivePoints.length) return;
     if (typeof window.html2canvas !== 'function' || !window.jspdf) {
         alert('Не удалось загрузить библиотеки для PDF — проверьте подключение к интернету и обновите страницу.');
         return;
@@ -1564,7 +1624,7 @@ async function exportPdf() {
                 // шапка — отдельной строкой сетки над плитками, высоты плиток не меняются
                 clonedContent.style.gridTemplateRows = 'auto 35vh 60vh 40vh';
                 clonedContent.style.gridTemplateAreas = '"pdf-header pdf-header" "total-chart total-chart" "collision-matrix section-table" "discipline-chart discipline-chart"';
-                clonedContent.insertBefore(buildPdfHeader(clonedDocument, folder), clonedContent.firstChild);
+                clonedContent.insertBefore(buildPdfHeader(clonedDocument), clonedContent.firstChild);
                 inlineSvgStyles(clonedDocument);
             },
         });
@@ -1583,7 +1643,7 @@ async function exportPdf() {
 
         const today = new Date();
         const dateKey = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
-        pdf.save(`${folder.name}_${dateKey}.pdf`);
+        pdf.save(`${projectName}_${dateKey}.pdf`);
     } catch (error) {
         console.error('Не удалось сформировать PDF:', error);
         alert('Не удалось сформировать PDF — подробности в консоли (F12).');
@@ -1634,23 +1694,26 @@ function updateZoomButtonVisibility() {
 
 // ===== Обработчики событий =====
 
+projectNameTitle.textContent = projectName;
+projectNameTitle.title = projectName;
+
 btnSelectFolder.addEventListener('click', () => {
-    // системный диалог выбора папки — в обеих версиях страницы, где он
-    // доступен; <input webkitdirectory> — запасной вариант (file://, Firefox),
-    // там браузер сам перечисляет ВСЕ файлы папки, включая вложенные
-    if (supportsDirectoryPicker && isSecureLocalContext) pickFolderWithDirectoryPicker();
-    else xmlFileInput.click();
+    // системный диалог выбора папки — где он доступен (Chrome/Edge);
+    // <input webkitdirectory> — запасной вариант (Firefox и т.п.), там браузер
+    // сам перечисляет ВСЕ файлы папки, а нужные отбирает isArchiveReportFile
+    if (canUseDirectoryPicker) pickFolderWithDirectoryPicker();
+    else folderInput.click();
 });
 
-xmlFileInput.addEventListener('change', () => {
-    const allFiles = Array.from(xmlFileInput.files);
-    xmlFileInput.value = '';
-    if (!allFiles.length) return;
-    const folderName = (allFiles[0].webkitRelativePath || allFiles[0].name).split('/')[0];
-    addFolder(folderName, allFiles);
+folderInput.addEventListener('change', () => {
+    const allFiles = Array.from(folderInput.files);
+    folderInput.value = '';
+    const rootName = allFiles.length ? (allFiles[0].webkitRelativePath || allFiles[0].name).split('/')[0] : '';
+    loadFolders(rootName, allFiles).catch((error) => {
+        console.error('Не удалось прочитать папку:', error);
+        alert('Не удалось прочитать папку — подробности в консоли (F12).');
+    });
 });
-
-btnClearFolders.addEventListener('click', resetDashboard);
 
 disciplineFilterList.addEventListener('change', (event) => {
     const checkbox = event.target.closest('.discipline-filter__checkbox');
@@ -1660,10 +1723,24 @@ disciplineFilterList.addEventListener('change', (event) => {
     updateDashboard();
 });
 
-folderDropdownToggle.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const isOpen = folderDropdownList.classList.toggle('folder-dropdown__list--open');
-    folderDropdownToggle.setAttribute('aria-expanded', String(isOpen));
+folderFilterToggle.addEventListener('click', () => {
+    const isOpen = folderFilterPanel.classList.toggle('folder-dropdown__list--open');
+    folderFilterToggle.setAttribute('aria-expanded', String(isOpen));
+});
+
+// "Все": отметили — отмечены все папки, сняли — сняты все
+folderFilterAll.addEventListener('change', () => {
+    selectedFolderNames = folderFilterAll.checked ? new Set(folders.map((folder) => folder.name)) : new Set();
+    applyFolderSelection();
+});
+
+// отдельная папка; "Все" обновится само в updateFolderFilterState
+folderFilterOptions.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('.folder-filter__checkbox');
+    if (!checkbox) return;
+    if (checkbox.checked) selectedFolderNames.add(checkbox.value);
+    else selectedFolderNames.delete(checkbox.value);
+    applyFolderSelection();
 });
 
 startDateToggle.addEventListener('click', () => {
@@ -1693,15 +1770,11 @@ document.addEventListener('click', (event) => {
         endDateList.classList.remove('folder-dropdown__list--open');
         endDateToggle.setAttribute('aria-expanded', 'false');
     }
-    if (!folderDropdown.contains(event.target)) {
-        closeFolderDropdown();
+    // клики по галочкам внутри фильтра папок его не закрывают
+    if (!folderFilter.contains(event.target)) {
+        closeFolderFilter();
     }
 });
-
-if (btnExportReport) {
-    if (canWriteFiles) btnExportReport.addEventListener('click', exportReport);
-    else btnExportReport.disabled = true;
-}
 
 if (btnExportPdf) btnExportPdf.addEventListener('click', exportPdf);
 
@@ -1731,10 +1804,9 @@ function rebuildDisciplineFilters(disciplines) {
     const newFilter = new Set();
     sortedDisciplines.forEach(d => { if (KNOWN_DISCIPLINES.includes(d)) newFilter.add(d); });
     disciplineFilter = newFilter;
-    sortedDisciplines.forEach(d => {
-        if (KNOWN_DISCIPLINES.includes(d)) newFilter.add(d);
-    });
-    disciplineFilter = newFilter;
+
+    // всегда два столбца (см. .discipline-filter__list): строк — половина пунктов
+    disciplineFilterList.style.setProperty('--list-rows', Math.max(1, Math.ceil(newFilter.size / 2)));
 
     sortedDisciplines.forEach(d => {
         if (!KNOWN_DISCIPLINES.includes(d)) return;
@@ -1759,11 +1831,6 @@ function getFilteredGuidEntriesFromPoint(data) {
 
 // ===== Зум (Ctrl+колесо) =====
 
-let zoomState = {
-    total: { start: 0, end: null },
-    discipline: { start: 0, end: null }
-};
-
 document.addEventListener('wheel', function(event) {
     if (!event.ctrlKey) return;
 
@@ -1784,27 +1851,35 @@ document.addEventListener('wheel', function(event) {
     const totalPoints = archivePoints.length;
     if (totalPoints <= 1) return;
 
-    const rect = svg.getBoundingClientRect();
-    const paddingLeft = 20;
-    const paddingRight = 20;
-    const chartWidth = rect.width - paddingLeft - paddingRight;
-    if (chartWidth <= 0) return;
-
-    const mouseX = event.clientX - rect.left - paddingLeft;
-    const fraction = Math.max(0, Math.min(1, mouseX / chartWidth));
-    const pointIndex = Math.round(fraction * (totalPoints - 1));
-    const clamped = Math.max(0, Math.min(totalPoints - 1, pointIndex));
-
     const zoom = zoomState[graphType];
-    const currentStart = zoom.start;
+    // без зума (end === null) виден весь диапазон, start при этом не учитывается
+    const currentStart = (zoom.end !== null) ? zoom.start : 0;
     const currentEnd = (zoom.end !== null) ? zoom.end : totalPoints - 1;
     const currentRange = currentEnd - currentStart + 1;
+
+    // Точка под курсором: курсор переводится в координаты viewBox (с учётом
+    // масштаба и полей preserveAspectRatio), затем — в индекс среди ВИДИМЫХ
+    // сейчас точек, с теми же отступами CHART_PADDING, что и при отрисовке
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return;
+    const cursor = svg.createSVGPoint();
+    cursor.x = event.clientX;
+    cursor.y = event.clientY;
+    const svgX = cursor.matrixTransform(matrix.inverse()).x;
+    const chartWidth = svg.viewBox.baseVal.width - CHART_PADDING.left - CHART_PADDING.right;
+    if (chartWidth <= 0) return;
+
+    const fraction = Math.max(0, Math.min(1, (svgX - CHART_PADDING.left) / chartWidth));
+    const pointIndex = currentStart + Math.round(fraction * (currentRange - 1));
+    const clamped = Math.max(0, Math.min(totalPoints - 1, pointIndex));
 
     const delta = event.deltaY;
     let newStart = currentStart;
     let newEnd = currentEnd;
 
-    if (delta > 0) {
+    // колесо вверх (deltaY < 0) — приближение к точке под курсором,
+    // колесо вниз — отдаление
+    if (delta < 0) {
         const newRange = Math.max(2, Math.floor(currentRange / 1.5));
         let half = Math.floor(newRange / 2);
         newStart = Math.max(0, Math.min(clamped - half, totalPoints - newRange));
@@ -1853,3 +1928,7 @@ setupTotalChartInteractions();
 setupDisciplineChartInteractions();
 setupSectionTableInteractions();
 resetDashboard();
+
+// при изменении размера окна меняется масштаб SVG графиков — подписи осей
+// пересчитываются, чтобы на экране оставаться того же размера
+window.addEventListener('resize', fitAllChartsTextToScreen);

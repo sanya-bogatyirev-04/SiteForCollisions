@@ -19,6 +19,67 @@
     --color-track: #e6e6e6;
 
     --sidebar-width: 300px;
+
+    /* ================= ШРИФТЫ =================
+       Два уровня настройки:
+       - переменные ГРУППЫ (--font-heading-*, --font-number-*, --font-kpi-*)
+         меняют сразу всё, что входит в группу;
+       - переменные ЭЛЕМЕНТА внутри группы по умолчанию ссылаются на группу —
+         замените значение у нужного элемента, чтобы поменять только его.
+       family — гарнитура, size — размер, weight — жирность
+       (300 тонкий, 400 обычный, 500 полужирный, 600–700 жирный). */
+
+    /* Основной шрифт страницы (весь остальной текст: подписи, легенда,
+       фильтр разделов, названия разделов и файлов в таблицах) */
+    --font-base-family: "Barlow Condensed", "Segoe UI", Arial, sans-serif;
+
+    /* --- Группа 1: заголовки и кнопки (образец — "Динамика коллизий") --- */
+    --font-heading-family: var(--font-base-family);
+    --font-heading-size: 22px;
+    --font-heading-weight: 400;
+
+    --font-app-title-size: var(--font-heading-size);         /* "Менеджер коллизий" */
+    --font-app-title-weight: var(--font-heading-weight);
+    --font-project-size: 32px;                               /* название проекта (имя html) */
+    --font-project-weight: var(--font-heading-weight);
+    --font-button-size: 18px;                                /* текст на всех кнопках */
+    --font-button-weight: var(--font-heading-weight);
+    --button-padding-y: 7px;                                 /* высота кнопок: отступ текста сверху и снизу */
+    --font-dropdown-item-size: 18px;     /* пункты выпадающего списка папок */
+    --font-dropdown-item-weight: var(--font-heading-weight);
+    --font-comparison-size: var(--font-heading-size);        /* числа Активные/Новые/Решённые */
+    --font-comparison-weight: var(--font-heading-weight);
+    --font-card-title-size: var(--font-heading-size);        /* заголовки плиток */
+    --font-card-title-weight: var(--font-heading-weight);
+
+    /* --- Группа 2: числа и даты (образец — числа в ячейках матрицы) --- */
+    --font-number-family: var(--font-base-family);
+    --font-number-size: 20px;
+    --font-number-weight: 400;
+
+    --font-date-select-size: 18px;        /* даты на кнопках и в списках "Начальная/Конечная дата" */
+    --font-date-select-weight: var(--font-number-weight);
+    --font-table-number-size: var(--font-number-size);       /* числа в матрице и таблице по разделам */
+    --font-table-number-weight: var(--font-number-weight);
+    --font-file-count-size: var(--font-number-size);         /* числа у файлов в таблице по разделам */
+    --font-file-count-weight: var(--font-number-weight);
+    --font-delta-size: var(--font-number-size);              /* изменения со стрелками ▲/▼ */
+    --font-delta-weight: var(--font-number-weight);
+    --font-axis-size: var(--font-number-size);               /* даты и числа на осях графиков (размер на экране) */
+    --font-axis-weight: var(--font-number-weight);
+    --font-tooltip-size: var(--font-number-size);            /* дата и число во всплывающей подсказке */
+    --font-tooltip-weight: var(--font-number-weight);
+
+    /* --- Фильтр разделов в боковом меню (пункты с галочками) --- */
+    --font-filter-family: var(--font-base-family);
+    --font-filter-size: 17px;
+    --font-filter-weight: 400;
+
+    /* --- Группа 3: крупные показатели в боковом меню --- */
+    --font-kpi-family: var(--font-number-family);
+    --font-kpi-weight: var(--font-number-weight);
+    --font-kpi-total-size: 45px;                             /* "всего" и процент */
+    --font-kpi-period-size: 35px;                            /* "за выбранный период" */
 }
 
 * {
@@ -27,7 +88,7 @@
 
 body {
     margin: 0;
-    font-family: "Barlow Condensed", "Segoe UI", Arial, sans-serif;
+    font-family: var(--font-base-family);
     color: var(--color-text);
     background: var(--color-bg);
     min-height: 100vh;
@@ -69,16 +130,21 @@ body.dragging-folders .sidebar {
 .sidebar__nav {
     display: flex;
     flex-direction: column;
-    padding: 0px 22px;
+    padding: 0 22px 20px;
     height: auto;
     background: rgba(255,255,255,0.95);
+}
+
+/* блоки сайдбара никогда не сжимаются по высоте — иначе при невысоком
+   окне текст наезжает на разделители; что не влезло — прокрутка сайдбара */
+.sidebar__nav > * {
+    flex-shrink: 0;
 }
 
 .sidebar__header {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding-bottom: 20px;
     padding-top: 20px;
 }
 
@@ -89,9 +155,22 @@ body.dragging-folders .sidebar {
 
 .sidebar__title {
     margin: 0;
-    font-size: 20px;
+    font-family: var(--font-heading-family);
+    font-size: var(--font-app-title-size);
     line-height: 1.15;
-    font-weight: 600;
+    font-weight: var(--font-app-title-weight);
+}
+
+/* Название проекта (имя html-файла) — над кнопкой выбора папки */
+.sidebar__project {
+    margin: 12px 0 0;
+    font-family: var(--font-heading-family);
+    font-size: var(--font-project-size);
+    font-weight: var(--font-project-weight);
+    line-height: 1.1;
+    text-align: center;
+    color: var(--color-accent-dark);
+    overflow-wrap: anywhere;
 }
 
 /* ===== Блок статистики ===== */
@@ -110,8 +189,9 @@ body.dragging-folders .sidebar {
 }
 
 .stats-item__value {
-    font-size: 45px;
-    font-weight: 300;
+    font-family: var(--font-kpi-family);
+    font-size: var(--font-kpi-total-size);
+    font-weight: var(--font-kpi-weight);
     line-height: 1;
 }
 
@@ -154,8 +234,9 @@ body.dragging-folders .sidebar {
 .period-stats__value {
     display: block;
     margin-top: 6px;
-    font-size: 35px;
-    font-weight: 300;
+    font-family: var(--font-kpi-family);
+    font-size: var(--font-kpi-period-size);
+    font-weight: var(--font-kpi-weight);
     line-height: 1;
     text-align: center;
 }
@@ -176,18 +257,28 @@ body.dragging-folders .sidebar {
     color: var(--color-muted);
 }
 
+/* всегда два столбца, блок столбцов — по центру сайдбара; пункты заполняют
+   столбцы сверху вниз (число строк --list-rows задаёт rebuildDisciplineFilters),
+   внутри столбца пункты выровнены по левому краю — галочки стоят ровно */
 .discipline-filter__list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 12px;
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    grid-template-rows: repeat(var(--list-rows, 1), auto);
+    grid-auto-flow: column;
+    justify-content: center;
+    column-gap: 40px;
 }
 
 .discipline-filter__item {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 14px;
+    padding: 2px 0;
+    font-family: var(--font-filter-family);
+    font-size: var(--font-filter-size);
+    font-weight: var(--font-filter-weight);
     cursor: pointer;
+    break-inside: avoid;
 }
 
 .discipline-filter__checkbox {
@@ -198,12 +289,21 @@ body.dragging-folders .sidebar {
 
 /* ===== Разделитель и кнопка ===== */
 
+/* Горизонтальные разделители сайдбара: одинаковый отступ сверху и снизу.
+   Отступ задаёт только сам разделитель — у блока сразу после него свой
+   margin-top обнуляется, у блоков перед ним нижних отступов нет. */
 .sidebar_divider_horizontal {
+    flex: 0 0 auto;
     width: 100%;
     border: none;
     border-top: 2px solid var(--color-border-short);
-    margin-top: 5px;
-    margin-bottom: 1px;
+    margin: 16px 0;
+}
+
+/* .sidebar__nav в селекторе — чтобы перебить margin-top у .btn-action,
+   .date-range-selectors и т.п., объявленных ниже */
+.sidebar__nav .sidebar_divider_horizontal + * {
+    margin-top: 0;
 }
 
 .sidebar_divider_vertical {
@@ -216,14 +316,15 @@ body.dragging-folders .sidebar {
 
 .btn-action {
     width: 100%;
-    padding: 10px 0;
+    padding: var(--button-padding-y) 0;
     margin-top: 12px;
     border: 1px solid var(--color-accent);
     border-radius: 10px;
     background: var(--color-accent);
     color: #ffffff;
-    font-size: 15px;
-    font-weight: 600;
+    font-family: var(--font-heading-family);
+    font-size: var(--font-button-size);
+    font-weight: var(--font-button-weight);
     cursor: pointer;
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
@@ -315,16 +416,101 @@ body.dragging-folders .sidebar {
     border-radius: 6px;
     background: none;
     color: var(--color-text);
-    font-size: 14px;
+    font-family: var(--font-heading-family);
+    font-size: var(--font-dropdown-item-size);
+    font-weight: var(--font-dropdown-item-weight);
     text-align: left;
     cursor: pointer;
     transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Даты — шрифтом чисел (как в матрице): и на кнопках "Начальная/Конечная
+   дата", и в их выпадающих списках */
+.date-selector .folder-dropdown__toggle,
+.date-selector .folder-dropdown__item {
+    font-family: var(--font-number-family);
+    font-size: var(--font-date-select-size);
+    font-weight: var(--font-date-select-weight);
+    text-align: center;
 }
 
 .folder-dropdown__item:hover,
 .folder-dropdown__item--active {
     background: var(--color-accent);
     color: #ffffff;
+}
+
+/* ===== Фильтр папок (дропдаун с галочками) ===== */
+
+/* Кнопка фильтра папок — того же размера, что и "Выбрать папку" над ней
+   (тот же вертикальный отступ и тот же промежуток), надпись по центру;
+   стрелка прижата к правому краю и на центровку надписи не влияет */
+.folder-filter {
+    margin-top: 12px;
+}
+
+.folder-filter .folder-dropdown__toggle {
+    position: relative;
+    justify-content: center;
+    padding: var(--button-padding-y) 28px;
+}
+
+.folder-filter .folder-dropdown__arrow {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    margin-top: -0.5em;
+    line-height: 1;
+}
+
+.folder-filter__panel.folder-dropdown__list--open {
+    max-height: 320px;
+}
+
+.folder-filter__item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px 8px;
+    border-radius: 6px;
+    color: var(--color-text);
+    font-family: var(--font-heading-family);
+    font-size: var(--font-dropdown-item-size);
+    font-weight: var(--font-dropdown-item-weight);
+    cursor: pointer;
+    break-inside: avoid;
+    transition: background-color 0.2s ease;
+}
+
+.folder-filter__item:hover {
+    background: var(--color-bg2);
+}
+
+.folder-filter__item--all {
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--color-border);
+    border-radius: 6px 6px 0 0;
+}
+
+.folder-filter__checkbox {
+    flex: 0 0 auto;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--color-accent);
+}
+
+.folder-filter__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* пункты сверху вниз; число столбцов (--list-columns) задаёт rebuildFolderFilter */
+.folder-filter__options {
+    column-count: var(--list-columns, 1);
+    column-gap: 4px;
 }
 
 .file-input-hidden {
@@ -369,7 +555,6 @@ body.dragging-folders .sidebar {
     min-height: 0;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     transition: box-shadow 0.2s ease;
-    justify-content: center;
 }
 
 .card:hover {
@@ -388,21 +573,17 @@ body.dragging-folders .sidebar {
     overflow: hidden;
 }
 
-/* Для карточек второй строки (матрица и таблица) — высота по содержимому */
+/* Карточки второй строки (матрица и таблица) — высотой в строку сетки (60vh).
+   Заголовок прижат к верху, тело занимает оставшуюся высоту, а содержимое
+   стоит по центру тела (margin: auto) — заголовок не "пляшет" от размера
+   содержимого. Если матрица или раскрытые списки файлов не помещаются —
+   прокрутка ВНУТРИ плитки, высота плитки не меняется. */
 .card:has(#collision-matrix-body),
 .card:has(#section-table-body) {
-    height: auto;
-    flex: 0 0 auto;
+    height: 100%;
 }
 
-.card:has(#collision-matrix-body) .card__body {
-    flex: 0 1 auto;
-    overflow: visible;
-}
-
-/* Таблица по разделам: тело занимает всю высоту плитки, а при раскрытых
-   списках файлов таблица прокручивается ВНУТРИ плитки — высота плитки не
-   меняется. Пока таблица помещается, она по-прежнему по центру (margin auto). */
+.card:has(#collision-matrix-body) .card__body,
 .card:has(#section-table-body) .card__body {
     flex: 1 1 auto;
     min-height: 0;
@@ -411,11 +592,12 @@ body.dragging-folders .sidebar {
     overflow: hidden;
 }
 
+.card:has(#collision-matrix-body) .matrix-table-wrapper,
 .card:has(#section-table-body) .section-table-wrapper {
     flex: 0 1 auto;
     min-height: 0;
     max-height: none;
-    margin: auto 0;
+    margin: auto;
 }
 
 .card:has(#total-chart-body) {
@@ -437,8 +619,9 @@ body.dragging-folders .sidebar {
 .card__title {
     display: flex;
     align-items: center;
-    font-size: 22px;
-    font-weight: 500;
+    font-family: var(--font-heading-family);
+    font-size: var(--font-card-title-size);
+    font-weight: var(--font-card-title-weight);
     line-height: 1.2;
     margin: 0 0 8px;
     color: var(--color-text);
@@ -449,9 +632,10 @@ body.dragging-folders .sidebar {
 
 .btn-zoom-last-five {
     margin-left: auto;
-    padding: 8px 12px;
-    font-size: 14px;
-    font-weight: 600;
+    padding: var(--button-padding-y) 12px;
+    font-family: var(--font-heading-family);
+    font-size: var(--font-button-size);
+    font-weight: var(--font-button-weight);
     border: 1px solid var(--color-accent);
     border-radius: 6px;
     background: var(--color-accent);
@@ -480,7 +664,7 @@ body.dragging-folders .sidebar {
 .section-table {
     border-collapse: separate;
     border-spacing: 0 3px;
-    font-size: 20px;
+    font-size: var(--font-table-number-size);
     width: 100%;
     table-layout: fixed;
 }
@@ -524,18 +708,32 @@ body.dragging-folders .sidebar {
     background: #ffffff;
 }
 
+/* числа в ячейках матрицы и колонке "Всего" таблицы по разделам
+   (прочерк в пустой ячейке — обычной жирностью, см. .heat-cell--empty) */
 .heat-cell {
     color: var(--color-text);
-    font-weight: 400;
+    font-family: var(--font-number-family);
+    font-weight: var(--font-table-number-weight);
 }
 
 .heat-cell--empty {
     background: transparent;
     color: var(--color-muted);
+    font-weight: 400;
+}
+
+/* Столбец "Раздел" (заголовок, названия разделов, имена файлов) — по левому
+   краю, вровень с заголовком плитки "Таблица по разделам": без левого
+   отступа ячейки. Селекторы с .section-table — чтобы перебить общее
+   text-align: center у ".section-table td/th". */
+.section-table thead th:first-child,
+.section-table .section-table__discipline,
+.section-table .section-table__file-row .section-table__file-name {
+    padding-left: 0;
+    text-align: left;
 }
 
 .section-table__discipline {
-    text-align: left;
     font-weight: 400;
 }
 
@@ -554,9 +752,12 @@ body.dragging-folders .sidebar {
     background: #ffffff;
 }
 
+/* стрелка раскрытия — ПОСЛЕ названия раздела, чтобы само название стояло
+   вровень с заголовком плитки */
 .section-table__toggle {
     display: inline-block;
     width: 16px;
+    margin-left: 6px;
     color: var(--color-muted);
     font-size: 14px;
     visibility: hidden;
@@ -586,34 +787,23 @@ body.dragging-folders .sidebar {
 }
 
 .section-table .section-table__file-name {
-    padding-left: 24px;
-    text-align: left;
     color: var(--color-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.section-table__file-count {
+/* число коллизий файла и его изменение — шрифтом чисел, как в матрице
+   (имя файла остаётся мельче) */
+.section-table .section-table__file-row .section-table__file-count {
     color: var(--color-text);
+    font-family: var(--font-number-family);
+    font-size: var(--font-file-count-size);
+    font-weight: var(--font-file-count-weight);
 }
 
 .section-table__file-row .value-delta {
     margin-left: 6px;
-    font-size: 14px;
-}
-
-.section-table__file-row .value-delta__triangle {
-    border-left-width: 4px;
-    border-right-width: 4px;
-}
-
-.section-table__file-row .value-delta__triangle--down {
-    border-top-width: 6px;
-}
-
-.section-table__file-row .value-delta__triangle--up {
-    border-bottom-width: 6px;
 }
 
 /* ===== Шапка PDF (вставляется только в копию страницы при выгрузке) ===== */
@@ -643,8 +833,9 @@ body.dragging-folders .sidebar {
 /* Индикатор изменения */
 .value-delta {
     margin-left: 8px;
-    font-size: 20px;
-    font-weight: 400;
+    font-family: var(--font-number-family);
+    font-size: var(--font-delta-size);
+    font-weight: var(--font-delta-weight);
     white-space: nowrap;
 }
 
@@ -676,10 +867,14 @@ body.dragging-folders .sidebar {
 
 /* ===== Графики ===== */
 
+/* Подписи осей (даты и числа) — шрифтом чисел, как в матрице. SVG
+   масштабируется под ширину плитки, поэтому размер делится на масштаб
+   (--chart-scale выставляет fitChartTextToScreen) — на экране ровно
+   --font-axis-size. */
 .chart-axis-label {
-    font-family: "Barlow Condensed", "Segoe UI", Arial, sans-serif;
-    font-size: 15px;
-    font-weight: 400;
+    font-family: var(--font-number-family);
+    font-size: calc(var(--font-axis-size) / var(--chart-scale, 1));
+    font-weight: var(--font-axis-weight);
     fill: #333;
 }
 
@@ -701,6 +896,11 @@ body.dragging-folders .sidebar {
     stroke-linejoin: round;
     stroke-linecap: round;
     transition: stroke 0.15s ease;
+}
+
+/* линия раздела, не выделенного в легенде графика по разделам */
+.chart-line--dimmed {
+    stroke-width: 1.5;
 }
 
 .chart-point {
@@ -784,7 +984,7 @@ body.dragging-folders .sidebar {
     border: 2px solid #000000;
     border-radius: 6px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    font-family: "Barlow Condensed", "Segoe UI", Arial, sans-serif;
+    font-family: var(--font-base-family);
     font-size: 14px;
     font-weight: 600;
     color: #000000;
@@ -793,12 +993,17 @@ body.dragging-folders .sidebar {
     white-space: nowrap;
     line-height: 1.4;
 }
+/* дата и число в подсказке — шрифтом чисел, как в матрице */
+.custom-tooltip .date,
+.custom-tooltip .value {
+    font-family: var(--font-number-family);
+    font-size: var(--font-tooltip-size);
+    font-weight: var(--font-tooltip-weight);
+}
 .custom-tooltip .date {
-    font-weight: 400;
     color: #555;
 }
 .custom-tooltip .value {
-    font-weight: 700;
     color: #000;
 }
 
@@ -838,7 +1043,9 @@ body.dragging-folders .sidebar {
 
 /* Число */
 .comparison-stats__item .number {
-    font-size: 24px;
+    font-family: var(--font-heading-family);
+    font-size: var(--font-comparison-size);
+    font-weight: var(--font-comparison-weight);
     color: #000000;
 }
 
@@ -863,33 +1070,37 @@ body.dragging-folders .sidebar {
     text-align: center;
 }
 
+/* жирность числа задаёт --font-comparison-weight (см. .comparison-stats__item .number),
+   здесь — только цвет и жирность подписи */
 .comparison-stats__item--active .number,
 .comparison-stats__item--active .label {
     color: var(--color-active-for-text);
-    font-weight: 500;
 }
 
 .comparison-stats__item--new .number,
 .comparison-stats__item--new .label {
     color: var(--color-negative-for-text);
-    font-weight: 500;
 }
 
 .comparison-stats__item--resolved .number,
 .comparison-stats__item--resolved .label {
     color: var(--color-positive-for-text);
+}
+
+.comparison-stats__item .label {
     font-weight: 500;
 }
 
 /* ===== Два выпадающих списка для выбора дат ===== */
 
+/* два выбора дат всегда в одну строку, каждый — ровно половина ширины
+   (даты шрифтом чисел 20px — иначе не помещались рядом и переносились) */
 .date-range-selectors {
     display: flex;
     flex-direction: row;
-    gap: 10px;
+    gap: 6px;
     margin-top: 12px;
     align-items: flex-start;
-    flex-wrap: wrap;
     justify-content: space-between;
 }
 
@@ -897,7 +1108,8 @@ body.dragging-folders .sidebar {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    flex: 0 1 auto;
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .date-selector__label {
@@ -909,25 +1121,32 @@ body.dragging-folders .sidebar {
 }
 
 .date-selector .folder-dropdown {
-    width: fit-content;
+    width: 100%;
     margin-top: 0;
 }
 
+/* дата — по центру кнопки, стрелка прижата к правому краю и на центровку
+   не влияет (как у кнопки фильтра папок) */
 .date-selector .folder-dropdown__toggle {
-    width: auto;
-    min-width: 110px;
-    max-width: 180px;
-    padding: 6px 12px;
+    position: relative;
+    width: 100%;
+    padding: 6px 18px;
     margin-top: 0;
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
+}
+
+.date-selector .folder-dropdown__arrow {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    margin-top: -0.5em;
+    line-height: 1;
 }
 
 .date-selector .folder-dropdown__list {
     width: 100%;
-    min-width: 130px;
-    max-width: 180px;
     box-sizing: border-box;
 }
 

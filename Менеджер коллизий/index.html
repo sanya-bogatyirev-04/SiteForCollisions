@@ -24,15 +24,24 @@
                     
                     <hr class="sidebar_divider_horizontal">
 
-                    <button type="button" id="btn-select-folder" class="btn-action">Выбрать папку с XML-отчётами</button>
-                    <input type="file" id="xml-file-input" class="file-input-hidden" webkitdirectory directory>
+                    <!-- название проекта = имя этого html-файла (см. getProjectName) -->
+                    <h2 id="project-name" class="sidebar__project"></h2>
 
-                    <div id="folder-dropdown" class="folder-dropdown" hidden>
-                        <button type="button" id="folder-dropdown-toggle" class="btn-action folder-dropdown__toggle">
-                            <span id="folder-dropdown-label">Папка не выбрана</span>
+                    <button type="button" id="btn-select-folder" class="btn-action">Выбрать папку</button>
+                    <input type="file" id="folder-input" class="file-input-hidden" webkitdirectory directory>
+
+                    <div id="folder-filter" class="folder-dropdown folder-filter" hidden>
+                        <button type="button" id="folder-filter-toggle" class="btn-action folder-dropdown__toggle" aria-expanded="false">
+                            <span id="folder-filter-label">Папки не выбраны</span>
                             <span class="folder-dropdown__arrow">▾</span>
                         </button>
-                        <ul id="folder-dropdown-list" class="folder-dropdown__list"></ul>
+                        <div id="folder-filter-panel" class="folder-dropdown__list folder-filter__panel">
+                            <label class="folder-filter__item folder-filter__item--all">
+                                <input type="checkbox" id="folder-filter-all" class="folder-filter__checkbox">
+                                <span class="folder-filter__name">Все</span>
+                            </label>
+                            <div id="folder-filter-options" class="folder-filter__options"></div>
+                        </div>
                     </div>
 
                     <div class="stats-block">
@@ -103,8 +112,6 @@
                     <div class="discipline-filter__list" id="discipline-filter-list"></div>
 
                     <hr class="sidebar_divider_horizontal">
-
-                    <button type="button" id="btn-clear-folders" class="btn-action">Очистить выбор папок</button>
 
                     <button type="button" id="btn-export-pdf" class="btn-action">Выгрузить в PDF</button>
                 </nav>

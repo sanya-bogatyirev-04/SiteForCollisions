@@ -11,10 +11,12 @@ const KNOWN_DISCIPLINES = ["АР", "КР", "ВК", "ЭОМ", "ВиК", "ОТМ",
 const NOT_DEFINED = "Не опр.";
 
 /**
- * Название папки с архивом. Пользователь выбирает одну папку (обычно
- * "03-Проверки"); в каждой её НЕПОСРЕДСТВЕННОЙ подпапке лежит "!АРХИВ", а в
- * нём — ПЛОСКО, без вложенных папок по датам — JSON-отчёты вида
- * "<имя подпапки>_дд-мм-гггг.json" (их выгружает отдельный exe).
+ * Название папки с архивом. Отчёты лежат ТОЛЬКО внутри "!АРХИВ":
+ *   1) <выбранная>/<подпапка>/!АРХИВ/<подпапка>_дд-мм-гггг.json   (классика)
+ *   2) <выбранная>/!АРХИВ/<имя>_дд-мм-гггг.json                  (без подпапок)
+ * Подпапка без "!АРХИВ" пропускается. Если архива нет ни в одной
+ * подпапке, ни в корне выбранной папки — loadFolders показывает уведомление.
+ * Саму "!АРХИВ" пользователь не выбирает.
  */
 const ARCHIVE_FOLDER_NAME = '!АРХИВ';
 
@@ -252,19 +254,43 @@ function parseReportFileName(fileName) {
  */
 function isArchiveReportFile(file) {
     if (!file.name.toLowerCase().endsWith('.json')) return false;
-    const segments = (file.webkitRelativePath || '').split('/');
-    if (segments.length !== 4) return false;
-    if (segments[2] !== ARCHIVE_FOLDER_NAME) return false;
     const parsed = parseReportFileName(file.name);
-    return Boolean(parsed) && parsed.folderNamePart === segments[1];
+    if (!parsed) return false;
+    const segments = (file.webkitRelativePath || '').split('/');
+
+    // <выбранная>/<подпапка>/!АРХИВ/<файл>
+    if (segments.length === 4 && segments[2] === ARCHIVE_FOLDER_NAME) {
+        return parsed.folderNamePart === segments[1];
+    }
+    // <выбранная>/!АРХИВ/<файл>
+    if (segments.length === 3 && segments[1] === ARCHIVE_FOLDER_NAME) {
+        return true;
+    }
+    return false;
 }
+// function isArchiveReportFile(file) {
+//     if (!file.name.toLowerCase().endsWith('.json')) return false;
+//     const segments = (file.webkitRelativePath || '').split('/');
+//     if (segments.length !== 4) return false;
+//     if (segments[2] !== ARCHIVE_FOLDER_NAME) return false;
+//     const parsed = parseReportFileName(file.name);
+//     return Boolean(parsed) && parsed.folderNamePart === segments[1];
+// }
 
 /**
  * Имя подпапки, к которой относится отчёт (второй сегмент пути)
  */
 function getReportFolderName(file) {
-    return file.webkitRelativePath.split('/')[1];
+    const segments = file.webkitRelativePath.split('/');
+    if (segments.length === 4 && segments[2] === ARCHIVE_FOLDER_NAME) {
+        return segments[1];
+    }
+    const parsed = parseReportFileName(file.name);
+    return parsed ? parsed.folderNamePart : segments[0];
 }
+// function getReportFolderName(file) {
+//     return file.webkitRelativePath.split('/')[1];
+// }
 
 /**
  * reportFiles — уже отобранные отчёты одной подпапки (см. isArchiveReportFile).
@@ -1266,11 +1292,20 @@ async function loadFolders(rootName, allFiles) {
     ));
     const nonEmptyFolders = loadedFolders.filter((folder) => folder.archivePoints.length > 0);
     if (!nonEmptyFolders.length) {
-        // прежние данные (если были) не трогаем
         const where = rootName ? `В папке "${rootName}"` : 'В выбранной папке';
-        alert(`${where} не найдено ни одного отчёта. Ожидается: <подпапка>/${ARCHIVE_FOLDER_NAME}/<имя подпапки>_дд-мм-гггг.json`);
+        alert(`${where} не найдено ни одного отчёта в папке "${ARCHIVE_FOLDER_NAME}".\n\n` +
+            `Ожидается одна из структур:\n` +
+            `  • <подпапка>/${ARCHIVE_FOLDER_NAME}/<имя подпапки>_дд-мм-гггг.json\n` +
+            `  • ${ARCHIVE_FOLDER_NAME}/<имя>_дд-мм-гггг.json\n\n` +
+            `Подпапки без "${ARCHIVE_FOLDER_NAME}" игнорируются.`);
         return;
     }
+    // if (!nonEmptyFolders.length) {
+    //     // прежние данные (если были) не трогаем
+    //     const where = rootName ? `В папке "${rootName}"` : 'В выбранной папке';
+    //     alert(`${where} не найдено ни одного отчёта. Ожидается: <подпапка>/${ARCHIVE_FOLDER_NAME}/<имя подпапки>_дд-мм-гггг.json`);
+    //     return;
+    // }
     nonEmptyFolders.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
     resetDashboard();
@@ -1438,14 +1473,15 @@ async function pickFolderWithDirectoryPicker() {
  */
 async function collectReportFilesFromDirectoryHandle(rootHandle) {
     const results = [];
+
+    // 1) Классика: у каждой подпапки свой "!АРХИВ"
     for await (const [folderName, folderHandle] of rootHandle.entries()) {
         if (folderHandle.kind !== 'directory') continue;
+        if (folderName === ARCHIVE_FOLDER_NAME) continue;
         let archiveHandle;
         try {
             archiveHandle = await folderHandle.getDirectoryHandle(ARCHIVE_FOLDER_NAME);
-        } catch (e) {
-            continue; // в подпапке нет "!АРХИВ"
-        }
+        } catch (e) { continue; } // в подпапке нет !АРХИВ — пропускаем
         for await (const [fileName, fileHandle] of archiveHandle.entries()) {
             if (fileHandle.kind !== 'file') continue;
             const parsed = parseReportFileName(fileName);
@@ -1455,8 +1491,43 @@ async function collectReportFilesFromDirectoryHandle(rootHandle) {
             results.push(file);
         }
     }
+    if (results.length) return results;
+
+    // 2) "!АРХИВ" лежит прямо в выбранной папке
+    let rootArchiveHandle;
+    try { rootArchiveHandle = await rootHandle.getDirectoryHandle(ARCHIVE_FOLDER_NAME); }
+    catch (e) { return results; } // нет !АРХИВ ни в подпапках, ни в корне
+    for await (const [fileName, fileHandle] of rootArchiveHandle.entries()) {
+        if (fileHandle.kind !== 'file') continue;
+        const parsed = parseReportFileName(fileName);
+        if (!parsed) continue;
+        const file = await fileHandle.getFile();
+        setRelativePath(file, [rootHandle.name, ARCHIVE_FOLDER_NAME, fileName]);
+        results.push(file);
+    }
     return results;
 }
+// async function collectReportFilesFromDirectoryHandle(rootHandle) {
+//     const results = [];
+//     for await (const [folderName, folderHandle] of rootHandle.entries()) {
+//         if (folderHandle.kind !== 'directory') continue;
+//         let archiveHandle;
+//         try {
+//             archiveHandle = await folderHandle.getDirectoryHandle(ARCHIVE_FOLDER_NAME);
+//         } catch (e) {
+//             continue; // в подпапке нет "!АРХИВ"
+//         }
+//         for await (const [fileName, fileHandle] of archiveHandle.entries()) {
+//             if (fileHandle.kind !== 'file') continue;
+//             const parsed = parseReportFileName(fileName);
+//             if (!parsed || parsed.folderNamePart !== folderName) continue;
+//             const file = await fileHandle.getFile();
+//             setRelativePath(file, [rootHandle.name, folderName, ARCHIVE_FOLDER_NAME, fileName]);
+//             results.push(file);
+//         }
+//     }
+//     return results;
+// }
 
 /**
  * Путь от выбранной папки — как у файлов из <input webkitdirectory>, чтобы
@@ -1493,10 +1564,13 @@ function handleDroppedItems(dataTransferItems) {
  */
 async function collectReportFilesFromEntry(rootEntry) {
     const results = [];
+
+    // 1) Классика: у каждой подпапки свой "!АРХИВ"
     const folderEntries = (await readAllDirectoryEntries(rootEntry)).filter((entry) => entry.isDirectory);
     for (const folderEntry of folderEntries) {
+        if (folderEntry.name === ARCHIVE_FOLDER_NAME) continue;
         const archiveEntry = await getChildDirectoryEntry(folderEntry, ARCHIVE_FOLDER_NAME);
-        if (!archiveEntry) continue;
+        if (!archiveEntry) continue; // подпапка без !АРХИВ — пропускаем
         const fileEntries = (await readAllDirectoryEntries(archiveEntry)).filter((entry) => entry.isFile);
         for (const fileEntry of fileEntries) {
             const parsed = parseReportFileName(fileEntry.name);
@@ -1506,8 +1580,38 @@ async function collectReportFilesFromEntry(rootEntry) {
             results.push(file);
         }
     }
+    if (results.length) return results;
+
+    // 2) "!АРХИВ" прямо в перетащенной папке
+    const rootArchiveEntry = await getChildDirectoryEntry(rootEntry, ARCHIVE_FOLDER_NAME);
+    if (!rootArchiveEntry) return results;
+    const fileEntries = (await readAllDirectoryEntries(rootArchiveEntry)).filter((entry) => entry.isFile);
+    for (const fileEntry of fileEntries) {
+        const parsed = parseReportFileName(fileEntry.name);
+        if (!parsed) continue;
+        const file = await readEntryAsFile(fileEntry);
+        setRelativePath(file, [rootEntry.name, ARCHIVE_FOLDER_NAME, fileEntry.name]);
+        results.push(file);
+    }
     return results;
 }
+// async function collectReportFilesFromEntry(rootEntry) {
+//     const results = [];
+//     const folderEntries = (await readAllDirectoryEntries(rootEntry)).filter((entry) => entry.isDirectory);
+//     for (const folderEntry of folderEntries) {
+//         const archiveEntry = await getChildDirectoryEntry(folderEntry, ARCHIVE_FOLDER_NAME);
+//         if (!archiveEntry) continue;
+//         const fileEntries = (await readAllDirectoryEntries(archiveEntry)).filter((entry) => entry.isFile);
+//         for (const fileEntry of fileEntries) {
+//             const parsed = parseReportFileName(fileEntry.name);
+//             if (!parsed || parsed.folderNamePart !== folderEntry.name) continue;
+//             const file = await readEntryAsFile(fileEntry);
+//             setRelativePath(file, [rootEntry.name, folderEntry.name, ARCHIVE_FOLDER_NAME, fileEntry.name]);
+//             results.push(file);
+//         }
+//     }
+//     return results;
+// }
 
 /**
  * Вложенная папка по имени (или null). Если getDirectory недоступен —
